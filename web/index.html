@@ -308,6 +308,7 @@
       let worklet = null;
       let mutedOutput = null;
       let frameCount = 0;
+      let isRecording = false;
 
       const workletSource = `
         class CaptureProcessor extends AudioWorkletProcessor {
@@ -400,6 +401,7 @@
           ws.addEventListener("open", () => {
             setSocket("open", true);
             setAudio("streaming");
+            isRecording = true;
             sendJson({
               type: "session.update",
               session: {
@@ -420,7 +422,7 @@
             mutedOutput = audioContext.createGain();
             mutedOutput.gain.value = 0;
             worklet.port.onmessage = (event) => {
-              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
               frameCount += 1;
               els.frames.textContent = String(frameCount);
               sendJson({
@@ -466,6 +468,7 @@
       }
 
       function cleanupAudio() {
+        isRecording = false;
         if (worklet) worklet.disconnect();
         if (source) source.disconnect();
         if (mutedOutput) mutedOutput.disconnect();
@@ -487,9 +490,10 @@
       }
 
       function stop() {
-        sendJson({ type: "input_audio_buffer.commit" });
-        setAudio("committed");
+        isRecording = false;
         cleanupAudio();
+        setAudio("committed");
+        sendJson({ type: "input_audio_buffer.commit" });
       }
 
       els.start.addEventListener("click", start);

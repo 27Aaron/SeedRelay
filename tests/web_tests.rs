@@ -9,6 +9,22 @@ fn index_html_uses_seed_asr_realtime_endpoint() {
 }
 
 #[test]
+fn index_html_stops_capture_before_committing_audio() {
+    let guard = "if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;";
+    let stop_capture = "isRecording = false;";
+    let commit = r#"sendJson({ type: "input_audio_buffer.commit" });"#;
+    let stop_function_start = INDEX_HTML.find("function stop()").expect("stop function");
+    let stop_function = &INDEX_HTML[stop_function_start..];
+
+    assert!(INDEX_HTML.contains("let isRecording = false;"));
+    assert!(INDEX_HTML.contains(guard));
+    assert!(
+        stop_function.find(stop_capture).expect("stop capture")
+            < stop_function.find(commit).expect("commit audio")
+    );
+}
+
+#[test]
 fn renders_index_page_response() {
     let response = http_response("GET", "/").expect("index response");
 
