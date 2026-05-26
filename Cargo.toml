@@ -1,0 +1,33 @@
+[package]
+name = "seedrelay"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "seedrelay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "seedrelay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+hex = "0.4"
+md5 = "0.7"
+opus = "0.3"
+prost = "0.13"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

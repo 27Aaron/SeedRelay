@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SeedRelay</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10120f;
+        --panel: #171a16;
+        --panel-2: #20241d;
+        --ink: #eef2df;
+        --muted: #a9b29a;
+        --line: #343b2e;
+        --accent: #d7ff5f;
+        --accent-2: #7bdff2;
+        --danger: #ff7a7a;
+        --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(135deg, rgba(215, 255, 95, 0.09), transparent 34%),
+          radial-gradient(circle at 80% 16%, rgba(123, 223, 242, 0.14), transparent 28%),
+          var(--bg);
+        color: var(--ink);
+        font-family:
+          ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
+          monospace;
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 32px 0;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.14fr);
+        gap: 16px;
+        min-height: calc(100vh - 64px);
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        background: color-mix(in srgb, var(--panel) 92%, transparent);
+        box-shadow: var(--shadow);
+      }
+
+      .control {
+        display: flex;
+        flex-direction: column;
+        padding: 22px;
+      }
+
+      .brand {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+        padding-bottom: 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(28px, 5vw, 64px);
+        line-height: 0.92;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .tag {
+        border: 1px solid var(--line);
+        color: var(--accent);
+        padding: 8px 10px;
+        white-space: nowrap;
+        font-size: 12px;
+        background: #10140e;
+      }
+
+      .status-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin: 20px 0;
+      }
+
+      .metric {
+        min-height: 82px;
+        padding: 13px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 18px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr 44px;
+        gap: 10px;
+        margin-top: auto;
+      }
+
+      button {
+        height: 44px;
+        border: 1px solid var(--line);
+        background: #eef2df;
+        color: #11140f;
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: transparent;
+        color: var(--ink);
+      }
+
+      button.icon {
+        background: var(--panel-2);
+        color: var(--muted);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.42;
+      }
+
+      .meter {
+        height: 12px;
+        margin: 4px 0 22px;
+        border: 1px solid var(--line);
+        background: #0b0d0a;
+        overflow: hidden;
+      }
+
+      .meter div {
+        width: 0%;
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        transition: width 90ms linear;
+      }
+
+      .transcript {
+        display: grid;
+        grid-template-rows: minmax(240px, 1fr) minmax(180px, 0.64fr);
+        gap: 16px;
+      }
+
+      .readout,
+      .events {
+        padding: 22px;
+        overflow: hidden;
+      }
+
+      .label {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        margin-bottom: 14px;
+      }
+
+      #partial,
+      #final {
+        font-family:
+          "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+        letter-spacing: 0;
+      }
+
+      #partial {
+        min-height: 150px;
+        font-size: clamp(30px, 6vw, 72px);
+        line-height: 1.04;
+        overflow-wrap: anywhere;
+      }
+
+      #final {
+        color: var(--accent);
+        margin-top: 22px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        font-size: clamp(18px, 2vw, 28px);
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
+      #events {
+        height: calc(100% - 28px);
+        overflow: auto;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+      }
+
+      .ok {
+        color: var(--accent);
+      }
+
+      .bad {
+        color: var(--danger);
+      }
+
+      @media (max-width: 860px) {
+        .shell {
+          grid-template-columns: 1fr;
+        }
+
+        .control {
+          min-height: 430px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="shell">
+        <section class="panel control">
+          <div class="brand">
+            <h1>Seed<br />Relay</h1>
+            <div class="tag">seed-asr-2.0</div>
+          </div>
+
+          <div class="status-grid">
+            <div class="metric">
+              <span>Socket</span>
+              <strong id="socketState">idle</strong>
+            </div>
+            <div class="metric">
+              <span>Audio</span>
+              <strong id="audioState">idle</strong>
+            </div>
+            <div class="metric">
+              <span>Rate</span>
+              <strong id="rate">--</strong>
+            </div>
+            <div class="metric">
+              <span>Frames</span>
+              <strong id="frames">0</strong>
+            </div>
+          </div>
+
+          <div class="label">Signal</div>
+          <div class="meter"><div id="level"></div></div>
+
+          <div class="buttons">
+            <button id="start">Start</button>
+            <button id="stop" class="secondary" disabled>Stop</button>
+            <button id="clear" class="icon" title="Clear">×</button>
+          </div>
+        </section>
+
+        <section class="transcript">
+          <div class="panel readout">
+            <div class="label">Transcript</div>
+            <div id="partial"></div>
+            <div id="final"></div>
+          </div>
+          <div class="panel events">
+            <div class="label">Events</div>
+            <div id="events"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const els = {
+        start: document.querySelector("#start"),
+        stop: document.querySelector("#stop"),
+        clear: document.querySelector("#clear"),
+        socketState: document.querySelector("#socketState"),
+        audioState: document.querySelector("#audioState"),
+        rate: document.querySelector("#rate"),
+        frames: document.querySelector("#frames"),
+        level: document.querySelector("#level"),
+        partial: document.querySelector("#partial"),
+        final: document.querySelector("#final"),
+        events: document.querySelector("#events"),
+      };
+
+      let ws = null;
+      let mediaStream = null;
+      let audioContext = null;
+      let source = null;
+      let worklet = null;
+      let mutedOutput = null;
+      let frameCount = 0;
+
+      const workletSource = `
+        class CaptureProcessor extends AudioWorkletProcessor {
+          process(inputs) {
+            const channel = inputs[0] && inputs[0][0];
+            if (channel && channel.length) {
+              this.port.postMessage(channel.slice(0));
+            }
+            return true;
+          }
+        }
+        registerProcessor("capture-processor", CaptureProcessor);
+      `;
+
+      function realtimeUrl() {
+        const url = new URL("/v1/realtime?model=seed-asr-2.0", window.location.href);
+        url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        return url.toString();
+      }
+
+      function log(line, kind = "") {
+        const time = new Date().toLocaleTimeString();
+        const prefix = kind ? `[${kind}]` : "";
+        els.events.textContent = `${time} ${prefix} ${line}\n${els.events.textContent}`.slice(0, 7000);
+      }
+
+      function setSocket(state, ok = false) {
+        els.socketState.textContent = state;
+        els.socketState.className = ok ? "ok" : "";
+      }
+
+      function setAudio(state, bad = false) {
+        els.audioState.textContent = state;
+        els.audioState.className = bad ? "bad" : "";
+      }
+
+      function pcm16Base64(samples) {
+        const bytes = new Uint8Array(samples.length * 2);
+        const view = new DataView(bytes.buffer);
+        let peak = 0;
+        for (let i = 0; i < samples.length; i += 1) {
+          const sample = Math.max(-1, Math.min(1, samples[i]));
+          peak = Math.max(peak, Math.abs(sample));
+          const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+          view.setInt16(i * 2, int16, true);
+        }
+        els.level.style.width = `${Math.min(100, peak * 140)}%`;
+
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        return btoa(binary);
+      }
+
+      function sendJson(payload) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify(payload));
+      }
+
+      async function start() {
+        els.start.disabled = true;
+        els.stop.disabled = false;
+        frameCount = 0;
+        els.frames.textContent = "0";
+        els.partial.textContent = "";
+        els.final.textContent = "";
+        setAudio("requesting");
+
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+          audioContext = new AudioContext();
+          els.rate.textContent = `${audioContext.sampleRate} Hz`;
+          const moduleUrl = URL.createObjectURL(
+            new Blob([workletSource], { type: "application/javascript" })
+          );
+          await audioContext.audioWorklet.addModule(moduleUrl);
+          URL.revokeObjectURL(moduleUrl);
+
+          ws = new WebSocket(realtimeUrl());
+          setSocket("connecting");
+
+          ws.addEventListener("open", () => {
+            setSocket("open", true);
+            setAudio("streaming");
+            sendJson({
+              type: "session.update",
+              session: {
+                type: "transcription",
+                audio: {
+                  input: {
+                    format: {
+                      type: "audio/pcm",
+                      rate: audioContext.sampleRate,
+                    },
+                  },
+                },
+              },
+            });
+
+            source = audioContext.createMediaStreamSource(mediaStream);
+            worklet = new AudioWorkletNode(audioContext, "capture-processor");
+            mutedOutput = audioContext.createGain();
+            mutedOutput.gain.value = 0;
+            worklet.port.onmessage = (event) => {
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              frameCount += 1;
+              els.frames.textContent = String(frameCount);
+              sendJson({
+                type: "input_audio_buffer.append",
+                audio: pcm16Base64(event.data),
+              });
+            };
+            source.connect(worklet);
+            worklet.connect(mutedOutput);
+            mutedOutput.connect(audioContext.destination);
+          });
+
+          ws.addEventListener("message", (message) => {
+            const event = JSON.parse(message.data);
+            if (event.type === "conversation.item.input_audio_transcription.delta") {
+              els.partial.textContent += event.delta || "";
+            } else if (event.type === "conversation.item.input_audio_transcription.completed") {
+              els.final.textContent = event.transcript || els.partial.textContent;
+              setSocket("completed", true);
+            } else if (event.type === "error") {
+              log(event.error?.message || "error", "error");
+            } else {
+              log(event.type || message.data);
+            }
+          });
+
+          ws.addEventListener("close", () => {
+            setSocket("closed");
+            cleanupAudio();
+          });
+
+          ws.addEventListener("error", () => {
+            setSocket("error");
+            log("websocket error", "error");
+          });
+        } catch (error) {
+          els.start.disabled = false;
+          els.stop.disabled = true;
+          setAudio("failed", true);
+          log(error.message || String(error), "error");
+          cleanupAudio();
+        }
+      }
+
+      function cleanupAudio() {
+        if (worklet) worklet.disconnect();
+        if (source) source.disconnect();
+        if (mutedOutput) mutedOutput.disconnect();
+        if (mediaStream) {
+          for (const track of mediaStream.getTracks()) track.stop();
+        }
+        if (audioContext && audioContext.state !== "closed") {
+          audioContext.close();
+        }
+        worklet = null;
+        source = null;
+        mutedOutput = null;
+        mediaStream = null;
+        audioContext = null;
+        els.start.disabled = false;
+        els.stop.disabled = true;
+        setAudio("idle");
+        els.level.style.width = "0%";
+      }
+
+      function stop() {
+        sendJson({ type: "input_audio_buffer.commit" });
+        setAudio("committed");
+        cleanupAudio();
+      }
+
+      els.start.addEventListener("click", start);
+      els.stop.addEventListener("click", stop);
+      els.clear.addEventListener("click", () => {
+        els.partial.textContent = "";
+        els.final.textContent = "";
+        els.events.textContent = "";
+      });
+
+      setSocket("idle");
+      setAudio("idle");
+      log(realtimeUrl());
+    </script>
+  </body>
+</html>

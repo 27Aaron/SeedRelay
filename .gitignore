@@ -1,0 +1,17 @@
+# Rust build outputs
+/target/
+
+# Local runtime state
+/credentials.json
+*.log
+
+# Environment and editor files
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+
+# Temporary files
+*.tmp
+*.bak
