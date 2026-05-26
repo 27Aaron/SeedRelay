@@ -246,14 +246,16 @@ async fn send_json(
     write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     value: Value,
 ) -> Result<()> {
-    write.send(Message::Text(value.to_string())).await?;
+    write.send(Message::Text(value.to_string().into())).await?;
     Ok(())
 }
 
 fn decode_socket_message(message: Message) -> Result<String> {
     match message {
-        Message::Text(text) => Ok(text),
-        Message::Binary(bytes) => String::from_utf8(bytes).context("binary message is not UTF-8"),
+        Message::Text(text) => Ok(text.to_string()),
+        Message::Binary(bytes) => {
+            String::from_utf8(bytes.to_vec()).context("binary message is not UTF-8")
+        }
         Message::Close(_) => Ok(r#"{"type":"session.close"}"#.to_string()),
         _ => Err(anyhow!("unsupported websocket message")),
     }

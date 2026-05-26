@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use rand::RngCore;
+use rand::Rng;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT as USER_AGENT_HEADER};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -396,7 +396,7 @@ fn json_string_or_number(payload: &Value, string_key: &str, number_key: &str) ->
 
 fn random_openudid() -> String {
     let mut bytes = [0u8; 8];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 

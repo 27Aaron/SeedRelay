@@ -50,10 +50,9 @@ pub async fn transcribe_pcm_channel(
     let request_id = Uuid::new_v4().to_string();
 
     write
-        .send(Message::Binary(build_start_task(
-            &request_id,
-            &credentials.token,
-        )))
+        .send(Message::Binary(
+            build_start_task(&request_id, &credentials.token).into(),
+        ))
         .await?;
     if let Err(error) = expect_lifecycle_message(&mut read, "TaskStarted").await {
         let _ = event_tx.send(AsrEvent::Error(error.to_string())).await;
@@ -61,11 +60,14 @@ pub async fn transcribe_pcm_channel(
     }
 
     write
-        .send(Message::Binary(build_start_session(
-            &request_id,
-            &credentials.token,
-            session_payload(&credentials.device_id),
-        )))
+        .send(Message::Binary(
+            build_start_session(
+                &request_id,
+                &credentials.token,
+                session_payload(&credentials.device_id),
+            )
+            .into(),
+        ))
         .await?;
     if let Err(error) = expect_lifecycle_message(&mut read, "SessionStarted").await {
         let _ = event_tx.send(AsrEvent::Error(error.to_string())).await;
@@ -128,12 +130,9 @@ pub async fn transcribe_pcm_channel(
             let opus = encoder.encode(&frame)?;
             let timestamp_ms = start_ms + frame_index * config.frame_duration_ms as u64;
             write
-                .send(Message::Binary(build_task_request(
-                    &request_id,
-                    opus,
-                    frame_state,
-                    timestamp_ms,
-                )))
+                .send(Message::Binary(
+                    build_task_request(&request_id, opus, frame_state, timestamp_ms).into(),
+                ))
                 .await?;
             frame_index += 1;
         }
@@ -146,18 +145,20 @@ pub async fn transcribe_pcm_channel(
     };
     let last_opus = encoder.encode(&final_pcm)?;
     write
-        .send(Message::Binary(build_task_request(
-            &request_id,
-            last_opus,
-            FrameState::Last,
-            start_ms + frame_index * config.frame_duration_ms as u64,
-        )))
+        .send(Message::Binary(
+            build_task_request(
+                &request_id,
+                last_opus,
+                FrameState::Last,
+                start_ms + frame_index * config.frame_duration_ms as u64,
+            )
+            .into(),
+        ))
         .await?;
     write
-        .send(Message::Binary(build_finish_session(
-            &request_id,
-            &credentials.token,
-        )))
+        .send(Message::Binary(
+            build_finish_session(&request_id, &credentials.token).into(),
+        ))
         .await?;
 
     let final_text = timeout(Duration::from_secs(20), receiver)
@@ -206,8 +207,8 @@ where
 
 fn message_to_bytes(message: Message) -> Vec<u8> {
     match message {
-        Message::Binary(data) => data,
-        Message::Text(text) => text.into_bytes(),
+        Message::Binary(data) => data.to_vec(),
+        Message::Text(text) => text.to_string().into_bytes(),
         _ => Vec::new(),
     }
 }
