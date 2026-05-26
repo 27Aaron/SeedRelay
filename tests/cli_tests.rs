@@ -1,4 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -8,12 +7,16 @@ use seedrelay::cli::Cli;
 fn parses_default_server_cli() {
     let cli = Cli::parse_from(["seedrelay"]);
 
-    assert_eq!(
-        cli.bind,
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000)
-    );
+    assert!(cli.bind.is_none());
     assert!(!cli.reset_credentials);
     assert!(!cli.web);
+}
+
+#[test]
+fn parses_bind_override_flag() {
+    let cli = Cli::parse_from(["seedrelay", "--bind", "0.0.0.0:9000"]);
+
+    assert_eq!(cli.bind.unwrap().to_string(), "0.0.0.0:9000");
 }
 
 #[test]

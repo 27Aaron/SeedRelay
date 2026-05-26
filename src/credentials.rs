@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::env_file::{env_value, parse_env};
+
 pub const REGISTER_URL: &str = "https://log.snssdk.com/service/2/device_register/";
 pub const SETTINGS_URL: &str = "https://is.snssdk.com/service/settings/v3/";
 pub const AID: u32 = 401734;
@@ -120,8 +122,6 @@ pub async fn ensure_credentials(
     Ok(fresh)
 }
 
-type EnvEntries = Vec<(String, String)>;
-
 fn missing_env_error(path: &Path) -> anyhow::Error {
     let custom_path_note = if path == Path::new(".env") {
         String::new()
@@ -137,39 +137,6 @@ fn missing_env_error(path: &Path) -> anyhow::Error {
         path.display(),
         custom_path_note
     )
-}
-
-fn parse_env(contents: &str) -> EnvEntries {
-    contents
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                return None;
-            }
-            let (key, value) = trimmed.split_once('=')?;
-            Some((key.trim().to_string(), unquote_env_value(value.trim())))
-        })
-        .collect()
-}
-
-fn env_value(entries: &EnvEntries, key: &str) -> Option<String> {
-    entries
-        .iter()
-        .rev()
-        .find(|(entry_key, _)| entry_key == key)
-        .map(|(_, value)| value.clone())
-}
-
-fn unquote_env_value(value: &str) -> String {
-    if value.len() >= 2
-        && ((value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\'')))
-    {
-        value[1..value.len() - 1].to_string()
-    } else {
-        value.to_string()
-    }
 }
 
 fn update_env_credentials(existing: &str, credentials: &CachedCredentials) -> String {

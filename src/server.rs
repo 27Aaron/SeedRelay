@@ -64,19 +64,25 @@ async fn handle_connection(
         return serve_http_connection(stream).await;
     }
 
-    let ws = accept_hdr_async(stream, |request: &Request, response: Response| {
-        let target = request
-            .uri()
-            .path_and_query()
-            .map(|value| value.as_str())
-            .unwrap_or("");
-        validate_realtime_target(target).map_err(bad_request_response)?;
-        Ok(response)
-    })
-    .await
-    .context("websocket handshake failed")?;
+    let ws = accept_hdr_async(stream, validate_realtime_request)
+        .await
+        .context("websocket handshake failed")?;
 
     handle_realtime_socket(ws, credentials.as_ref().clone()).await
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_realtime_request(
+    request: &Request,
+    response: Response,
+) -> std::result::Result<Response, ErrorResponse> {
+    let target = request
+        .uri()
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or("");
+    validate_realtime_target(target).map_err(bad_request_response)?;
+    Ok(response)
 }
 
 async fn is_websocket_upgrade(stream: &TcpStream) -> Result<bool> {
