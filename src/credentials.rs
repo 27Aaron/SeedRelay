@@ -19,6 +19,12 @@ pub const VERSION_NAME: &str = "1.1.2";
 pub const CHANNEL: &str = "official";
 pub const PACKAGE: &str = "com.bytedance.android.doubaoime";
 pub const USER_AGENT: &str = "com.bytedance.android.doubaoime/100102018 (Linux; U; Android 16; en_US; Pixel 7 Pro; Build/BP2A.250605.031.A2; Cronet/TTNetVersion:94cf429a 2025-11-17 QuicVersion:1f89f732 2025-05-08)";
+const DEVICE_ID_KEY: &str = "device_id";
+const INSTALL_ID_KEY: &str = "install_id";
+const CDID_KEY: &str = "cdid";
+const OPENUDID_KEY: &str = "openudid";
+const CLIENTUDID_KEY: &str = "clientudid";
+const TOKEN_KEY: &str = "token";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CachedCredentials {
@@ -33,29 +39,34 @@ pub struct CachedCredentials {
 impl CachedCredentials {
     pub fn load(path: &Path) -> Result<Self> {
         let data = fs::read_to_string(path)
-            .with_context(|| format!("failed to read credentials {}", path.display()))?;
-        serde_json::from_str(&data)
-            .with_context(|| format!("failed to parse credentials {}", path.display()))
+            .with_context(|| format!("failed to read env file {}", path.display()))?;
+        let env = parse_env(&data);
+        let get = |key: &str| env_value(&env, key).unwrap_or_default();
+
+        Ok(Self {
+            device_id: get(DEVICE_ID_KEY),
+            install_id: get(INSTALL_ID_KEY),
+            cdid: get(CDID_KEY),
+            openudid: get(OPENUDID_KEY),
+            clientudid: get(CLIENTUDID_KEY),
+            token: get(TOKEN_KEY),
+        })
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
+        if !path.exists() {
+            return Err(missing_env_error(path));
         }
-        let data = serde_json::to_string_pretty(self)?;
+        let existing = fs::read_to_string(path)
+            .with_context(|| format!("failed to read env file {}", path.display()))?;
+        let data = update_env_credentials(&existing, self);
         fs::write(path, data)
-            .with_context(|| format!("failed to write credentials {}", path.display()))
+            .with_context(|| format!("failed to write env file {}", path.display()))
     }
 }
 
-pub fn default_credentials_path() -> PathBuf {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".config")
-        .join("seedrelay")
-        .join("credentials.json")
+pub fn default_env_path() -> PathBuf {
+    PathBuf::from(".env")
 }
 
 pub fn is_jwt_expired(token: &str, margin_seconds: u64) -> bool {
@@ -79,8 +90,14 @@ pub async fn ensure_credentials(
     path: &Path,
     reset: bool,
 ) -> Result<CachedCredentials> {
-    if reset && path.exists() {
-        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
+    if !path.exists() {
+        return Err(missing_env_error(path));
+    }
+
+    if reset {
+        let existing = fs::read_to_string(path).unwrap_or_default();
+        fs::write(path, remove_env_credentials(&existing))
+            .with_context(|| format!("failed to reset env credentials {}", path.display()))?;
     }
 
     if let Ok(mut cached) = CachedCredentials::load(path) {
@@ -101,6 +118,113 @@ pub async fn ensure_credentials(
     fresh.token = fetch_asr_token(client, &fresh.device_id, &fresh.cdid).await?;
     fresh.save(path)?;
     Ok(fresh)
+}
+
+type EnvEntries = Vec<(String, String)>;
+
+fn missing_env_error(path: &Path) -> anyhow::Error {
+    let custom_path_note = if path == Path::new(".env") {
+        String::new()
+    } else {
+        format!(
+            " If you use --env-path, copy the template to {} instead.",
+            path.display()
+        )
+    };
+
+    anyhow!(
+        "Missing .env file at {}. Run `cp .env.example .env` first, then start SeedRelay again.{} Do not edit device_id, install_id, cdid, openudid, clientudid, or token manually; SeedRelay updates them automatically after registration or token refresh.",
+        path.display(),
+        custom_path_note
+    )
+}
+
+fn parse_env(contents: &str) -> EnvEntries {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+            let (key, value) = trimmed.split_once('=')?;
+            Some((key.trim().to_string(), unquote_env_value(value.trim())))
+        })
+        .collect()
+}
+
+fn env_value(entries: &EnvEntries, key: &str) -> Option<String> {
+    entries
+        .iter()
+        .rev()
+        .find(|(entry_key, _)| entry_key == key)
+        .map(|(_, value)| value.clone())
+}
+
+fn unquote_env_value(value: &str) -> String {
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        value[1..value.len() - 1].to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn update_env_credentials(existing: &str, credentials: &CachedCredentials) -> String {
+    let mut preserved = remove_env_credentials(existing);
+    if !preserved.is_empty() && !preserved.ends_with('\n') {
+        preserved.push('\n');
+    }
+    preserved.push_str(DEVICE_ID_KEY);
+    preserved.push('=');
+    preserved.push_str(&credentials.device_id);
+    preserved.push('\n');
+    preserved.push_str(INSTALL_ID_KEY);
+    preserved.push('=');
+    preserved.push_str(&credentials.install_id);
+    preserved.push('\n');
+    preserved.push_str(CDID_KEY);
+    preserved.push('=');
+    preserved.push_str(&credentials.cdid);
+    preserved.push('\n');
+    preserved.push_str(OPENUDID_KEY);
+    preserved.push('=');
+    preserved.push_str(&credentials.openudid);
+    preserved.push('\n');
+    preserved.push_str(CLIENTUDID_KEY);
+    preserved.push('=');
+    preserved.push_str(&credentials.clientudid);
+    preserved.push('\n');
+    preserved.push_str(TOKEN_KEY);
+    preserved.push('=');
+    preserved.push_str(&credentials.token);
+    preserved.push('\n');
+    preserved
+}
+
+fn remove_env_credentials(existing: &str) -> String {
+    existing
+        .lines()
+        .filter(|line| {
+            let key = line
+                .trim_start()
+                .split_once('=')
+                .map(|(key, _)| key.trim())
+                .unwrap_or("");
+            !matches!(
+                key,
+                DEVICE_ID_KEY
+                    | INSTALL_ID_KEY
+                    | CDID_KEY
+                    | OPENUDID_KEY
+                    | CLIENTUDID_KEY
+                    | TOKEN_KEY
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 async fn register_device(client: &reqwest::Client) -> Result<CachedCredentials> {

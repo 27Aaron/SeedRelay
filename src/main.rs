@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use seedrelay::credentials::default_credentials_path;
+use seedrelay::credentials::default_env_path;
 use seedrelay::server::serve_realtime;
 
 #[derive(Debug, Parser)]
@@ -16,7 +16,7 @@ struct Cli {
     bind: SocketAddr,
 
     #[arg(long, value_name = "PATH")]
-    credentials_path: Option<PathBuf>,
+    env_path: Option<PathBuf>,
 
     #[arg(long)]
     reset_credentials: bool,
@@ -28,16 +28,15 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let credentials_path = cli
-        .credentials_path
-        .unwrap_or_else(default_credentials_path);
+    let env_path = cli.env_path.unwrap_or_else(default_env_path);
 
-    serve_realtime(cli.bind, credentials_path, cli.reset_credentials, cli.web).await
+    serve_realtime(cli.bind, env_path, cli.reset_credentials, cli.web).await
 }
 
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::path::PathBuf;
 
     use super::Cli;
     use clap::Parser;
@@ -59,5 +58,12 @@ mod tests {
         let cli = Cli::parse_from(["seedrelay", "--web"]);
 
         assert!(cli.web);
+    }
+
+    #[test]
+    fn parses_env_path_flag() {
+        let cli = Cli::parse_from(["seedrelay", "--env-path", "/tmp/seedrelay.env"]);
+
+        assert_eq!(cli.env_path, Some(PathBuf::from("/tmp/seedrelay.env")));
     }
 }

@@ -2,12 +2,12 @@
 /target/
 
 # Local runtime state
-/credentials.json
 *.log
 
 # Environment and editor files
 .env
 .env.*
+!.env.example
 .DS_Store
 .idea/
 .vscode/

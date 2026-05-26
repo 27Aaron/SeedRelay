@@ -28,12 +28,12 @@ use crate::web::http_response;
 
 pub async fn serve_realtime(
     bind: SocketAddr,
-    credentials_path: PathBuf,
+    env_path: PathBuf,
     reset_credentials: bool,
     web_enabled: bool,
 ) -> Result<()> {
     let http = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
-    let credentials = ensure_credentials(&http, &credentials_path, reset_credentials).await?;
+    let credentials = ensure_credentials(&http, &env_path, reset_credentials).await?;
     let credentials = Arc::new(credentials);
     let listener = TcpListener::bind(bind)
         .await
