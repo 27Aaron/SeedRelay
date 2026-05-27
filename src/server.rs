@@ -1,5 +1,5 @@
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -31,15 +31,13 @@ use crate::web::{http_response_with_config, WebRuntimeConfig};
 struct RuntimeConfig {
     model: String,
     api_key: Option<String>,
-    debug: bool,
 }
 
 impl RuntimeConfig {
-    fn new(config: ServerConfig, debug: bool) -> Self {
+    fn new(config: ServerConfig) -> Self {
         Self {
             model: config.model,
             api_key: config.api_key,
-            debug,
         }
     }
 
@@ -58,7 +56,7 @@ impl RuntimeConfig {
     }
 
     fn startup_lines(&self, bind: SocketAddr, web_enabled: bool) -> Vec<String> {
-        let mut lines = vec![
+        let lines = vec![
             "SeedRelay ready".to_string(),
             format!("  Realtime  {}", self.realtime_url(bind)),
             format!("  Model     {}", self.model),
@@ -79,9 +77,6 @@ impl RuntimeConfig {
                 }
             ),
         ];
-        if self.debug {
-            lines.push("  Debug     enabled".to_string());
-        }
         lines
     }
 
@@ -90,26 +85,18 @@ impl RuntimeConfig {
             eprintln!("{line}");
         }
     }
-
-    fn debug_log(&self, message: impl AsRef<str>) {
-        if self.debug {
-            eprintln!("[debug] {}", message.as_ref());
-        }
-    }
 }
 
 pub async fn serve_realtime(
     config: ServerConfig,
-    env_path: PathBuf,
+    credentials_path: &Path,
     reset_credentials: bool,
     web_enabled: bool,
-    debug_enabled: bool,
 ) -> Result<()> {
     let bind = config.bind;
-    let runtime_config = Arc::new(RuntimeConfig::new(config, debug_enabled));
-    runtime_config.debug_log(format!("env path: {}", env_path.display()));
+    let runtime_config = Arc::new(RuntimeConfig::new(config));
     let http = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
-    let credentials = ensure_credentials(&http, &env_path, reset_credentials).await?;
+    let credentials = ensure_credentials(&http, credentials_path, reset_credentials).await?;
     let credentials = Arc::new(credentials);
     let listener = TcpListener::bind(bind)
         .await
@@ -121,7 +108,6 @@ pub async fn serve_realtime(
         let (stream, peer_addr) = listener.accept().await?;
         let credentials = Arc::clone(&credentials);
         let runtime_config = Arc::clone(&runtime_config);
-        runtime_config.debug_log(format!("accepted connection from {peer_addr}"));
         tokio::spawn(async move {
             if let Err(error) = handle_connection(
                 stream,
@@ -131,11 +117,7 @@ pub async fn serve_realtime(
             )
             .await
             {
-                if runtime_config.debug {
-                    eprintln!("[debug] connection {peer_addr} closed: {error:#}");
-                } else {
-                    eprintln!("connection {peer_addr} closed: {error}");
-                }
+                eprintln!("connection {peer_addr} closed: {error}");
             }
         });
     }
@@ -148,7 +130,6 @@ async fn handle_connection(
     web_enabled: bool,
 ) -> Result<()> {
     if !is_websocket_upgrade(&stream).await? {
-        runtime_config.debug_log("routing connection to HTTP handler");
         return serve_http_connection(stream, runtime_config.as_ref(), web_enabled).await;
     }
 
@@ -176,7 +157,6 @@ fn validate_realtime_request(
         .path_and_query()
         .map(|value| value.as_str())
         .unwrap_or("");
-    runtime_config.debug_log(format!("websocket target: {}", redact_api_key(target)));
     validate_realtime_target(target, &runtime_config.model).map_err(bad_request_response)?;
     let authorization = request
         .headers()
@@ -207,12 +187,16 @@ async fn serve_http_connection(
     let mut parts = first_line.split_whitespace();
     let method = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("/");
-    runtime_config.debug_log(format!("{method} {}", redact_api_key(target)));
-    let response = http_response_with_config(method, target, &runtime_config.web_config(), web_enabled)
-        .unwrap_or_else(|| {
-            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-                .to_string()
-        });
+    let response = http_response_with_config(
+        method,
+        target,
+        &runtime_config.web_config(),
+        web_enabled,
+    )
+    .unwrap_or_else(|| {
+        "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+            .to_string()
+    });
     stream.write_all(response.as_bytes()).await?;
     stream.shutdown().await?;
     Ok(())
@@ -257,10 +241,6 @@ async fn handle_realtime_socket(
         tokio::spawn(async move { transcribe_pcm_channel(&credentials, pcm_rx, asr_tx).await });
     tokio::pin!(asr_task);
 
-    runtime_config.debug_log(format!(
-        "websocket session opened model={}",
-        runtime_config.model
-    ));
     send_json(&mut write, session_updated_event(&runtime_config.model)).await?;
 
     loop {
@@ -294,20 +274,12 @@ async fn handle_realtime_socket(
                 };
                 match event {
                     AsrEvent::InterimResult(text) if !text.is_empty() => {
-                        runtime_config.debug_log(format!(
-                            "backend event interim_result chars={}",
-                            text.chars().count()
-                        ));
                         let delta = interim_delta(&mut interim_transcript, &text);
                         if !delta.is_empty() {
                             send_json(&mut write, transcript_delta_event(&item_id, &delta)).await?;
                         }
                     }
                     AsrEvent::FinalResult(text) if !text.is_empty() => {
-                        runtime_config.debug_log(format!(
-                            "backend event final_result chars={}",
-                            text.chars().count()
-                        ));
                         if let Some(transcript) =
                             append_final_transcript(&mut final_transcript, &text)
                         {
@@ -315,12 +287,10 @@ async fn handle_realtime_socket(
                         }
                     }
                     AsrEvent::SessionFinished => {
-                        runtime_config.debug_log("backend event session_finished");
                         send_json(&mut write, transcript_completed_event(&item_id, &final_transcript)).await?;
                         break;
                     }
                     AsrEvent::Error(message) => {
-                        runtime_config.debug_log(format!("backend event error: {message}"));
                         send_json(&mut write, error_event(message)).await?;
                         break;
                     }
@@ -345,7 +315,6 @@ async fn handle_realtime_socket(
     }
 
     let _ = write.close().await;
-    runtime_config.debug_log("websocket session closed");
     Ok(())
 }
 
@@ -359,22 +328,12 @@ async fn handle_client_event(
 ) -> Result<()> {
     match decode_client_event(raw)? {
         ClientEvent::SessionUpdate { input_sample_rate } => {
-            runtime_config.debug_log(format!(
-                "client event session.update sample_rate={}",
-                input_sample_rate
-                    .map(|rate| rate.to_string())
-                    .unwrap_or_else(|| "default".to_string())
-            ));
             if let Some(rate) = input_sample_rate {
                 *converter = Pcm16Converter::new(rate);
             }
             send_json(write, session_updated_event(&runtime_config.model)).await?;
         }
         ClientEvent::AppendAudio(audio) => {
-            runtime_config.debug_log(format!(
-                "client event input_audio_buffer.append bytes={}",
-                audio.len()
-            ));
             let Some(tx) = pcm_tx else {
                 return Err(anyhow!("audio was appended after commit"));
             };
@@ -384,12 +343,10 @@ async fn handle_client_event(
             }
         }
         ClientEvent::Commit => {
-            runtime_config.debug_log("client event input_audio_buffer.commit");
             drop(pcm_tx.take());
             send_json(write, input_audio_committed_event(item_id)).await?;
         }
         ClientEvent::Close => {
-            runtime_config.debug_log("client event session.close");
             drop(pcm_tx.take());
             send_json(write, input_audio_committed_event(item_id)).await?;
         }
@@ -474,6 +431,7 @@ fn validate_api_key(
     }
 }
 
+#[cfg(test)]
 fn redact_api_key(target: &str) -> String {
     let Some((path, query)) = target.split_once('?') else {
         return target.to_string();
@@ -617,14 +575,11 @@ mod tests {
 
     #[test]
     fn startup_lines_are_readable_and_hide_key() {
-        let runtime = RuntimeConfig::new(
-            ServerConfig {
-                bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
-                model: "custom/asr".to_string(),
-                api_key: Some("local-secret".to_string()),
-            },
-            true,
-        );
+        let runtime = RuntimeConfig::new(ServerConfig {
+            bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
+            model: "custom/asr".to_string(),
+            api_key: Some("local-secret".to_string()),
+        });
         let lines =
             runtime.startup_lines(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000), true);
 
@@ -634,20 +589,16 @@ mod tests {
         ));
         assert!(lines.contains(&"  Auth      API key required".to_string()));
         assert!(lines.contains(&"  Web UI    http://127.0.0.1:8000/".to_string()));
-        assert!(lines.contains(&"  Debug     enabled".to_string()));
         assert!(!lines.join("\n").contains("local-secret"));
     }
 
     #[test]
     fn startup_lines_show_disabled_web_and_auth_by_default() {
-        let runtime = RuntimeConfig::new(
-            ServerConfig {
-                bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
-                model: "seed-asr".to_string(),
-                api_key: None,
-            },
-            false,
-        );
+        let runtime = RuntimeConfig::new(ServerConfig {
+            bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
+            model: "seed-asr".to_string(),
+            api_key: None,
+        });
         let lines = runtime.startup_lines(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
             false,
