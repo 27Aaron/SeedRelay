@@ -55,6 +55,22 @@ fn index_html_keeps_brand_on_one_line() {
 }
 
 #[test]
+fn index_html_aligns_sidebar_metrics_and_signal_meter() {
+    assert!(STYLES_CSS.contains("--hairline: 1px solid var(--line);"));
+    assert!(STYLES_CSS.contains("--panel-padding: 22px;"));
+    assert!(STYLES_CSS.contains("--inset-padding: 14px;"));
+    assert!(STYLES_CSS.contains("display: grid;"));
+    assert!(STYLES_CSS.contains("grid-template-rows: auto auto;"));
+    assert!(STYLES_CSS.contains("align-content: space-between;"));
+    assert!(STYLES_CSS.contains("margin-bottom: 0;"));
+    assert!(STYLES_CSS.contains("grid-template-columns: minmax(0, 1fr) max-content;"));
+    assert!(STYLES_CSS.contains("min-width: 4ch;"));
+    assert!(STYLES_CSS.contains("font-family: var(--mono-font);"));
+    assert!(STYLES_CSS.contains("font-family: var(--serif-font);"));
+    assert!(!STYLES_CSS.contains("grid-template-columns: minmax(0, 1fr) 54px;"));
+}
+
+#[test]
 fn index_html_renders_transcript_sections() {
     assert!(INDEX_HTML.contains(r#"<div class="label label-row">"#));
     assert!(INDEX_HTML.contains(r#"<span class="live-dot" aria-hidden="true"></span>"#));

@@ -9,7 +9,18 @@
   --accent: #d7ff5f;
   --accent-2: #7bdff2;
   --danger: #ff7a7a;
+  --hairline: 1px solid var(--line);
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  --panel-padding: 22px;
+  --inset-padding: 14px;
+  --compact-label-size: 11px;
+  --mono-font: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
+    monospace;
+  --serif-font: "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia,
+    serif;
+  --field-bg: #0b0d0a;
+  --grid-line: rgba(169, 178, 154, 0.08);
+  --grid-line-strong: rgba(169, 178, 154, 0.1);
   --final-panel-block: calc((100vh - 64px) / 6);
   --transcript-content-size: clamp(14px, 1.05vw, 18px);
   --final-body-color: color-mix(in srgb, var(--ink) 94%, transparent);
@@ -27,9 +38,7 @@ body {
     radial-gradient(circle at 80% 16%, rgba(123, 223, 242, 0.14), transparent 28%),
     var(--bg);
   color: var(--ink);
-  font-family:
-    ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
-    monospace;
+  font-family: var(--mono-font);
 }
 
 main {
@@ -56,7 +65,7 @@ main {
 
 .panel {
   min-width: 0;
-  border: 1px solid var(--line);
+  border: var(--hairline);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
   box-shadow: var(--shadow);
 }
@@ -65,7 +74,7 @@ main {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 22px;
+  padding: var(--panel-padding);
 }
 
 .brand {
@@ -74,7 +83,7 @@ main {
   gap: 12px 16px;
   align-items: end;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--hairline);
 }
 
 h1 {
@@ -95,11 +104,11 @@ h1 {
 .tag {
   justify-self: end;
   align-self: end;
-  border: 1px solid var(--line);
+  border: var(--hairline);
   color: var(--accent);
   padding: 7px 9px;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--compact-label-size);
   margin-bottom: 2px;
   background: #10140e;
 }
@@ -114,22 +123,27 @@ h1 {
 .metric {
   min-height: 82px;
   padding: 13px;
+  display: grid;
+  grid-template-rows: auto auto;
+  align-content: space-between;
   background: var(--panel-2);
-  border: 1px solid var(--line);
+  border: var(--hairline);
 }
 
 .metric span {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--compact-label-size);
+  line-height: 1;
   text-transform: uppercase;
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 .metric strong {
   display: block;
   font-size: 18px;
   font-weight: 700;
+  line-height: 1.12;
   overflow-wrap: anywhere;
 }
 
@@ -142,7 +156,7 @@ h1 {
 
 button {
   height: 44px;
-  border: 1px solid var(--line);
+  border: var(--hairline);
   background: #eef2df;
   color: #11140f;
   font: inherit;
@@ -168,15 +182,15 @@ button:disabled {
 .meter {
   height: 26px;
   margin: 0;
-  border: 1px solid var(--line);
+  border: var(--hairline);
   background:
     repeating-linear-gradient(
       90deg,
       transparent 0,
       transparent 23px,
-      rgba(169, 178, 154, 0.1) 24px
+      var(--grid-line-strong) 24px
     ),
-    #0b0d0a;
+    var(--field-bg);
   overflow: hidden;
 }
 
@@ -195,8 +209,8 @@ button:disabled {
   gap: 14px;
   min-height: 0;
   margin: 6px 0 16px;
-  padding: 14px;
-  border: 1px solid var(--line);
+  padding: var(--inset-padding);
+  border: var(--hairline);
   background: color-mix(in srgb, var(--panel-2) 70%, transparent);
   overflow: hidden;
 }
@@ -215,14 +229,16 @@ button:disabled {
 
 .signal-meter-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 54px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 8px;
   align-items: center;
 }
 
 #signalValue {
   color: var(--ink);
   font-size: 18px;
+  line-height: 1;
+  min-width: 4ch;
   text-align: right;
 }
 
@@ -231,7 +247,7 @@ button:disabled {
   position: relative;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: var(--hairline);
   background:
     linear-gradient(
       180deg,
@@ -242,15 +258,15 @@ button:disabled {
       90deg,
       transparent 0,
       transparent 23px,
-      rgba(169, 178, 154, 0.08) 24px
+      var(--grid-line) 24px
     ),
     repeating-linear-gradient(
       0deg,
       transparent 0,
       transparent 23px,
-      rgba(169, 178, 154, 0.08) 24px
+      var(--grid-line) 24px
     ),
-    #0b0d0a;
+    var(--field-bg);
 }
 
 .signal-scope::before {
@@ -322,16 +338,13 @@ button:disabled {
 }
 
 .readout {
-  padding: 22px;
-  overflow: hidden;
-}
-
-.readout {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) var(--final-panel-block);
   block-size: calc(100vh - 64px);
   max-block-size: calc(100vh - 64px);
   min-height: 0;
+  padding: var(--panel-padding);
+  overflow: hidden;
 }
 
 .events {
@@ -340,8 +353,8 @@ button:disabled {
   grid-template-rows: auto minmax(0, 1fr);
   block-size: var(--final-panel-block);
   margin: 0 0 16px;
-  padding: 14px;
-  border: 1px solid var(--line);
+  padding: var(--inset-padding);
+  border: var(--hairline);
   background: color-mix(in srgb, var(--panel-2) 72%, transparent);
   min-height: 0;
   overflow: hidden;
@@ -360,7 +373,7 @@ button:disabled {
   gap: 10px;
   margin-bottom: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--hairline);
 }
 
 .live-dot {
@@ -372,8 +385,7 @@ button:disabled {
 
 #partial,
 #final {
-  font-family:
-    "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  font-family: var(--serif-font);
   letter-spacing: 0;
 }
 
@@ -394,9 +406,7 @@ button:disabled {
   content: attr(data-placeholder);
   display: block;
   color: color-mix(in srgb, var(--muted) 58%, transparent);
-  font-family:
-    ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
-    monospace;
+  font-family: var(--mono-font);
   font-size: 14px;
   line-height: 1.6;
 }
@@ -413,17 +423,14 @@ button:disabled {
 
 .line-index {
   color: color-mix(in srgb, var(--muted) 70%, transparent);
-  font-size: 11px;
-  font-family:
-    ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
-    monospace;
+  font-size: var(--compact-label-size);
+  font-family: var(--mono-font);
   text-transform: uppercase;
 }
 
 .line-text {
   color: color-mix(in srgb, var(--ink) 94%, transparent);
-  font-family:
-    "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  font-family: var(--serif-font);
   font-size: var(--transcript-content-size);
   line-height: 1.42;
   overflow-wrap: anywhere;
@@ -441,7 +448,7 @@ button:disabled {
   min-height: 0;
   margin-top: 0;
   padding-top: 16px;
-  border-top: 1px solid var(--line);
+  border-top: var(--hairline);
   overflow: hidden;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -449,7 +456,7 @@ button:disabled {
 
 .final-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--compact-label-size);
   text-transform: uppercase;
   margin-bottom: 10px;
 }
@@ -533,7 +540,7 @@ button:disabled {
 
   .control,
   .readout {
-    padding: 22px;
+    padding: var(--panel-padding);
   }
 
   .brand {
