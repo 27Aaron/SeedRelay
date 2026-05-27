@@ -65,6 +65,8 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" >> "$GITHUB_ENV"
 
       - name: Build
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: 3.5
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare artifact (Unix)
