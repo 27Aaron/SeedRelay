@@ -12,8 +12,7 @@ RUN apk add --no-cache ca-certificates opus
 
 WORKDIR /app
 COPY --from=builder /usr/src/seedrelay/target/release/seedrelay .
-RUN touch .env
 
 EXPOSE 8000
 
-CMD ["./seedrelay"]
+CMD ["./seedrelay", "--host", "0.0.0.0"]

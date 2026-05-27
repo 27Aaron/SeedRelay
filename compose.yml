@@ -1,0 +1,8 @@
+services:
+  seedrelay:
+    image: ghcr.io/27aaron/seedrelay:latest
+    container_name: seedrelay
+    ports:
+      - "8000:8000"
+    command: ["./seedrelay", "--host", "0.0.0.0"]
+    restart: unless-stopped
