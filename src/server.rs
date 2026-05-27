@@ -147,9 +147,9 @@ async fn handle_connection(
     runtime_config: Arc<RuntimeConfig>,
     web_enabled: bool,
 ) -> Result<()> {
-    if web_enabled && !is_websocket_upgrade(&stream).await? {
-        runtime_config.debug_log("routing connection to embedded web server");
-        return serve_http_connection(stream, runtime_config.as_ref()).await;
+    if !is_websocket_upgrade(&stream).await? {
+        runtime_config.debug_log("routing connection to HTTP handler");
+        return serve_http_connection(stream, runtime_config.as_ref(), web_enabled).await;
     }
 
     let handshake_config = Arc::clone(&runtime_config);
@@ -197,6 +197,7 @@ async fn is_websocket_upgrade(stream: &TcpStream) -> Result<bool> {
 async fn serve_http_connection(
     mut stream: TcpStream,
     runtime_config: &RuntimeConfig,
+    web_enabled: bool,
 ) -> Result<()> {
     let request = read_http_header(&mut stream).await?;
     let first_line = request
@@ -207,7 +208,7 @@ async fn serve_http_connection(
     let method = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("/");
     runtime_config.debug_log(format!("{method} {}", redact_api_key(target)));
-    let response = http_response_with_config(method, target, &runtime_config.web_config())
+    let response = http_response_with_config(method, target, &runtime_config.web_config(), web_enabled)
         .unwrap_or_else(|| {
             "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
                 .to_string()

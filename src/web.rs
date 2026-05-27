@@ -22,15 +22,36 @@ impl Default for WebRuntimeConfig {
 }
 
 pub fn http_response(method: &str, target: &str) -> Option<String> {
-    http_response_with_config(method, target, &WebRuntimeConfig::default())
+    http_response_with_config(method, target, &WebRuntimeConfig::default(), true)
 }
 
 pub fn http_response_with_config(
     method: &str,
     target: &str,
     config: &WebRuntimeConfig,
+    web_enabled: bool,
 ) -> Option<String> {
     let path = target.split('?').next().unwrap_or(target);
+
+    // Health endpoint is always available regardless of web_enabled.
+    if matches!(method, "GET" | "HEAD") && path == "/health" {
+        return Some(response(
+            "200 OK",
+            "application/json; charset=utf-8",
+            r#"{"ok":true}"#,
+            method == "HEAD",
+        ));
+    }
+
+    if !web_enabled {
+        return Some(response(
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            "not found",
+            false,
+        ));
+    }
+
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => Some(response(
             "200 OK",
@@ -86,12 +107,6 @@ pub fn http_response_with_config(
                 true,
             ))
         }
-        ("GET", "/health") => Some(response(
-            "200 OK",
-            "application/json; charset=utf-8",
-            r#"{"ok":true}"#,
-            false,
-        )),
         _ => Some(response(
             "404 Not Found",
             "text/plain; charset=utf-8",

@@ -241,7 +241,7 @@ fn serves_runtime_web_config() {
         api_key: Some("local-secret".into()),
     };
     let response =
-        http_response_with_config("GET", "/config.json", &config).expect("config response");
+        http_response_with_config("GET", "/config.json", &config, true).expect("config response");
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.contains("content-type: application/json; charset=utf-8\r\n"));
