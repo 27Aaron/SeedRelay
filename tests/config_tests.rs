@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 
 use seedrelay::config::{resolve_server_config, DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
 
