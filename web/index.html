@@ -17,6 +17,10 @@
         --accent-2: #7bdff2;
         --danger: #ff7a7a;
         --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+        --final-panel-block: calc((100vh - 64px) / 6);
+        --transcript-body-size: clamp(18px, 1.45vw, 24px);
+        --final-body-size: clamp(16px, 1.2vw, 20px);
+        --final-body-color: color-mix(in srgb, var(--ink) 94%, transparent);
       }
 
       * {
@@ -37,16 +41,25 @@
       }
 
       main {
-        width: min(1180px, calc(100vw - 32px));
+        width: min(1440px, calc(100vw - 32px));
         margin: 0 auto;
         padding: 32px 0;
       }
 
       .shell {
         display: grid;
-        grid-template-columns: minmax(280px, 0.86fr) minmax(420px, 1.14fr);
+        grid-template-columns: minmax(320px, 0.78fr) minmax(560px, 1.22fr);
         gap: 16px;
-        min-height: calc(100vh - 64px);
+        block-size: calc(100vh - 64px);
+        max-block-size: calc(100vh - 64px);
+        min-height: 0;
+      }
+
+      .side {
+        min-width: 0;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr);
+        min-height: 0;
       }
 
       .panel {
@@ -59,6 +72,7 @@
       .control {
         display: flex;
         flex-direction: column;
+        min-height: 0;
         padding: 22px;
       }
 
@@ -155,10 +169,17 @@
       }
 
       .meter {
-        height: 12px;
-        margin: 4px 0 22px;
+        height: 26px;
+        margin: 0;
         border: 1px solid var(--line);
-        background: #0b0d0a;
+        background:
+          repeating-linear-gradient(
+            90deg,
+            transparent 0,
+            transparent 23px,
+            rgba(169, 178, 154, 0.1) 24px
+          ),
+          #0b0d0a;
         overflow: hidden;
       }
 
@@ -169,23 +190,164 @@
         transition: width 90ms linear;
       }
 
-      .transcript {
-        min-width: 0;
+      .signal-panel {
+        --signal-level: 0%;
+        flex: 1 1 auto;
         display: grid;
-        grid-template-rows: minmax(240px, 1fr) minmax(180px, 0.64fr);
-        gap: 16px;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 14px;
+        min-height: 0;
+        margin: 6px 0 16px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+        overflow: hidden;
       }
 
-      .readout,
-      .events {
+      .signal-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 0;
+      }
+
+      .signal-heading span:last-child {
+        color: var(--accent);
+      }
+
+      .signal-meter-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 54px;
+        gap: 12px;
+        align-items: center;
+      }
+
+      #signalValue {
+        color: var(--ink);
+        font-size: 18px;
+        text-align: right;
+      }
+
+      .signal-scope {
+        isolation: isolate;
+        position: relative;
+        min-height: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background:
+          linear-gradient(
+            180deg,
+            rgba(238, 242, 223, 0.02),
+            rgba(11, 13, 10, 0.28)
+          ),
+          repeating-linear-gradient(
+            90deg,
+            transparent 0,
+            transparent 23px,
+            rgba(169, 178, 154, 0.08) 24px
+          ),
+          repeating-linear-gradient(
+            0deg,
+            transparent 0,
+            transparent 23px,
+            rgba(169, 178, 154, 0.08) 24px
+          ),
+          #0b0d0a;
+      }
+
+      .signal-scope::before {
+        content: "";
+        position: absolute;
+        right: 12px;
+        left: 12px;
+        top: 50%;
+        height: 1px;
+        background: color-mix(in srgb, var(--muted) 34%, transparent);
+        box-shadow: 0 0 12px rgba(215, 255, 95, 0.18);
+        z-index: 1;
+      }
+
+      .signal-scope::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(
+            90deg,
+            rgba(215, 255, 95, 0.08),
+            transparent 18%,
+            transparent 82%,
+            rgba(123, 223, 242, 0.07)
+          ),
+          radial-gradient(
+            circle at 50% 50%,
+            transparent 45%,
+            rgba(0, 0, 0, 0.28)
+          );
+        pointer-events: none;
+        z-index: 3;
+      }
+
+      .scope-wave {
+        position: absolute;
+        inset: 12px 12px 10px;
+        width: calc(100% - 24px);
+        height: calc(100% - 22px);
+        overflow: visible;
+        z-index: 2;
+      }
+
+      .signal-wave {
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        vector-effect: non-scaling-stroke;
+      }
+
+      .signal-wave-glow {
+        stroke: rgba(215, 255, 95, 0.16);
+        stroke-width: 3.5;
+        opacity: 0.24;
+        filter: url(#scopeGlow);
+      }
+
+      .signal-wave-trail {
+        stroke: rgba(123, 223, 242, 0.2);
+        stroke-width: 0.95;
+        opacity: 0.32;
+      }
+
+      .signal-wave-primary {
+        stroke: url(#scopeWaveGradient);
+        stroke-width: 1.35;
+        filter: url(#scopeGlow);
+      }
+
+      .readout {
         padding: 22px;
         overflow: hidden;
       }
 
       .readout {
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: auto minmax(0, 1fr) var(--final-panel-block);
+        block-size: calc(100vh - 64px);
+        max-block-size: calc(100vh - 64px);
         min-height: 0;
+      }
+
+      .events {
+        flex: 0 0 var(--final-panel-block);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        block-size: var(--final-panel-block);
+        margin: 0 0 16px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        background: color-mix(in srgb, var(--panel-2) 72%, transparent);
+        min-height: 0;
+        overflow: hidden;
       }
 
       .label {
@@ -219,12 +381,15 @@
       }
 
       #partial {
-        min-height: 210px;
-        padding: 4px 0 16px;
+        block-size: 100%;
+        max-block-size: none;
+        min-height: 0;
+        padding: 4px 0 8px;
         overflow: auto;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 8px;
+        overscroll-behavior: contain;
       }
 
       #partial.empty::before,
@@ -244,8 +409,8 @@
         grid-template-columns: 38px minmax(0, 1fr);
         gap: 12px;
         align-items: baseline;
-        min-height: 48px;
-        padding: 9px 0;
+        min-height: 40px;
+        padding: 7px 0;
         border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
       }
 
@@ -262,8 +427,8 @@
         color: color-mix(in srgb, var(--ink) 94%, transparent);
         font-family:
           "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
-        font-size: clamp(20px, 2.2vw, 32px);
-        line-height: 1.32;
+        font-size: var(--transcript-body-size);
+        line-height: 1.3;
         overflow-wrap: anywhere;
       }
 
@@ -276,11 +441,13 @@
       }
 
       .final-wrap {
-        min-height: 96px;
-        margin-top: 18px;
+        min-height: 0;
+        margin-top: 0;
         padding-top: 16px;
         border-top: 1px solid var(--line);
         overflow: hidden;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
       }
 
       .final-label {
@@ -291,21 +458,24 @@
       }
 
       #final {
-        color: var(--accent);
-        font-size: clamp(18px, 2vw, 28px);
-        line-height: 1.35;
-        max-height: 160px;
+        color: var(--final-body-color);
+        font-size: var(--final-body-size);
+        line-height: 1.45;
+        max-height: none;
+        min-height: 0;
         overflow: auto;
         overflow-wrap: anywhere;
+        overscroll-behavior: contain;
       }
 
       #events {
-        height: calc(100% - 28px);
+        min-height: 0;
         overflow: auto;
         color: var(--muted);
         font-size: 12px;
         line-height: 1.65;
         white-space: pre-wrap;
+        overscroll-behavior: contain;
       }
 
       .ok {
@@ -319,10 +489,31 @@
       @media (max-width: 860px) {
         .shell {
           grid-template-columns: 1fr;
+          block-size: auto;
+          max-block-size: none;
+          min-height: calc(100vh - 64px);
+        }
+
+        .side {
+          grid-template-rows: auto;
+          min-height: auto;
         }
 
         .control {
           min-height: 430px;
+        }
+
+        .events {
+          block-size: auto;
+          flex-basis: auto;
+          min-height: 120px;
+        }
+
+        .readout {
+          grid-template-rows: auto minmax(260px, 1fr) minmax(180px, auto);
+          block-size: auto;
+          max-block-size: none;
+          min-height: 560px;
         }
       }
 
@@ -333,12 +524,18 @@
         }
 
         .shell {
+          block-size: auto;
+          max-block-size: none;
           min-height: calc(100vh - 48px);
         }
 
+        .side {
+          grid-template-rows: auto;
+          min-height: auto;
+        }
+
         .control,
-        .readout,
-        .events {
+        .readout {
           padding: 22px;
         }
 
@@ -352,7 +549,7 @@
         }
 
         .line-text {
-          font-size: clamp(20px, 6vw, 28px);
+          font-size: clamp(18px, 5vw, 22px);
         }
       }
     </style>
@@ -360,64 +557,94 @@
   <body>
     <main>
       <div class="shell">
-        <section class="panel control">
-          <div class="brand">
-            <h1 class="wordmark">Seed Relay</h1>
-            <div class="tag">seed-asr-2.0</div>
+        <aside class="side">
+          <section class="panel control">
+            <div class="brand">
+              <h1 class="wordmark">Seed Relay</h1>
+              <div class="tag">seed-asr-2.0</div>
+            </div>
+
+            <div class="status-grid">
+              <div class="metric">
+                <span>Socket</span>
+                <strong id="socketState">idle</strong>
+              </div>
+              <div class="metric">
+                <span>Audio</span>
+                <strong id="audioState">idle</strong>
+              </div>
+              <div class="metric">
+                <span>Rate</span>
+                <strong id="rate">--</strong>
+              </div>
+              <div class="metric">
+                <span>Frames</span>
+                <strong id="frames">0</strong>
+              </div>
+            </div>
+
+            <section class="signal-panel">
+              <div class="label signal-heading">
+                <span>Signal</span>
+                <span id="signalState">quiet</span>
+              </div>
+              <div class="signal-meter-row">
+                <div class="meter"><div id="level"></div></div>
+                <strong id="signalValue">0%</strong>
+              </div>
+              <div class="signal-scope" aria-hidden="true">
+                <svg class="scope-wave" viewBox="0 0 240 96" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="scopeWaveGradient" x1="0" x2="1" y1="0" y2="0">
+                      <stop offset="0%" stop-color="#d7ff5f" />
+                      <stop offset="55%" stop-color="#a7f6b2" />
+                      <stop offset="100%" stop-color="#7bdff2" />
+                    </linearGradient>
+                    <filter id="scopeGlow" x="-20%" y="-80%" width="140%" height="260%">
+                      <feGaussianBlur stdDeviation="1.0" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
+                  <polyline id="signalWaveGlow" class="signal-wave signal-wave-glow"></polyline>
+                  <polyline id="signalWaveTrail" class="signal-wave signal-wave-trail"></polyline>
+                  <polyline id="signalWavePrimary" class="signal-wave signal-wave-primary"></polyline>
+                </svg>
+              </div>
+            </section>
+
+            <section class="events">
+              <div class="label">Events</div>
+              <div id="events"></div>
+            </section>
+
+            <div class="buttons">
+              <button id="start">Start</button>
+              <button id="stop" class="secondary" disabled>Stop</button>
+              <button id="clear" class="icon" title="Clear">×</button>
+            </div>
+          </section>
+        </aside>
+
+        <section class="panel readout">
+          <div class="label label-row">
+            <span>Transcript</span>
+            <span class="live-dot" aria-hidden="true"></span>
           </div>
-
-          <div class="status-grid">
-            <div class="metric">
-              <span>Socket</span>
-              <strong id="socketState">idle</strong>
-            </div>
-            <div class="metric">
-              <span>Audio</span>
-              <strong id="audioState">idle</strong>
-            </div>
-            <div class="metric">
-              <span>Rate</span>
-              <strong id="rate">--</strong>
-            </div>
-            <div class="metric">
-              <span>Frames</span>
-              <strong id="frames">0</strong>
-            </div>
-          </div>
-
-          <div class="label">Signal</div>
-          <div class="meter"><div id="level"></div></div>
-
-          <div class="buttons">
-            <button id="start">Start</button>
-            <button id="stop" class="secondary" disabled>Stop</button>
-            <button id="clear" class="icon" title="Clear">×</button>
-          </div>
-        </section>
-
-        <section class="transcript">
-          <div class="panel readout">
-            <div class="label label-row">
-              <span>Transcript</span>
-              <span class="live-dot" aria-hidden="true"></span>
-            </div>
+          <div
+            id="partial"
+            class="empty"
+            data-placeholder="Listening transcript appears here"
+          ></div>
+          <div class="final-wrap">
+            <div class="final-label">Final</div>
             <div
-              id="partial"
+              id="final"
               class="empty"
-              data-placeholder="Listening transcript appears here"
+              data-placeholder="Completed transcript appears here"
             ></div>
-            <div class="final-wrap">
-              <div class="final-label">Final</div>
-              <div
-                id="final"
-                class="empty"
-                data-placeholder="Completed transcript appears here"
-              ></div>
-            </div>
-          </div>
-          <div class="panel events">
-            <div class="label">Events</div>
-            <div id="events"></div>
           </div>
         </section>
       </div>
@@ -432,6 +659,12 @@
         audioState: document.querySelector("#audioState"),
         rate: document.querySelector("#rate"),
         frames: document.querySelector("#frames"),
+        signalPanel: document.querySelector(".signal-panel"),
+        signalState: document.querySelector("#signalState"),
+        signalValue: document.querySelector("#signalValue"),
+        signalWaveGlow: document.querySelector("#signalWaveGlow"),
+        signalWaveTrail: document.querySelector("#signalWaveTrail"),
+        signalWavePrimary: document.querySelector("#signalWavePrimary"),
         level: document.querySelector("#level"),
         partial: document.querySelector("#partial"),
         final: document.querySelector("#final"),
@@ -447,7 +680,13 @@
       let frameCount = 0;
       let isRecording = false;
       let transcriptText = "";
+      let signalPeak = 0;
+      let signalPhase = 0;
+      let lastSignalWaveAt = 0;
+      let lastSignalWaveLevel = 0;
       const MAX_TRANSCRIPT_LINE = 12;
+      const MAX_EVENT_LINES = 5;
+      const SIGNAL_WAVE_INTERVAL_MS = 140;
 
       const workletSource = `
         class CaptureProcessor extends AudioWorkletProcessor {
@@ -471,7 +710,9 @@
       function log(line, kind = "") {
         const time = new Date().toLocaleTimeString();
         const prefix = kind ? `[${kind}]` : "";
-        els.events.textContent = `${time} ${prefix} ${line}\n${els.events.textContent}`.slice(0, 7000);
+        const nextLine = `${time} ${prefix} ${line}`;
+        const lines = els.events.textContent.split("\n").filter(Boolean);
+        els.events.textContent = [nextLine, ...lines].slice(0, MAX_EVENT_LINES).join("\n");
       }
 
       function setSocket(state, ok = false) {
@@ -484,6 +725,57 @@
         els.audioState.className = bad ? "bad" : "";
       }
 
+      function signalStateForPeak(peak) {
+        if (peak >= 0.7) return "clipping";
+        if (peak >= 0.01) return "voice";
+        return "quiet";
+      }
+
+      function signalLevelFromPeak(peak) {
+        return Math.min(100, Math.sqrt(Math.min(1, Math.max(0, peak))) * 125);
+      }
+
+      function buildWavePoints(level, phase, offset = 0) {
+        const width = 240;
+        const center = 48;
+        const amplitude = level === 0 ? 0 : 0.8 + level * 0.1;
+        const points = [];
+        for (let i = 0; i <= 72; i += 1) {
+          const t = i / 72;
+          const x = t * width;
+          const carrier = Math.sin(t * Math.PI * 6 + phase + offset);
+          const detail = Math.sin(t * Math.PI * 17 + phase * 0.74 + offset) * 0.24;
+          const shimmer = Math.sin(t * Math.PI * 31 - phase * 0.36) * 0.08;
+          const y = Math.max(4, Math.min(92, center + (carrier + detail + shimmer) * amplitude));
+          points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+        }
+        return points.join(" ");
+      }
+
+      function updateSignalWave(level, force = false) {
+        const now = performance.now();
+        const becameActive = lastSignalWaveLevel === 0 && level > 0;
+        if (!force && !becameActive && now - lastSignalWaveAt < SIGNAL_WAVE_INTERVAL_MS) return;
+        lastSignalWaveAt = now;
+        lastSignalWaveLevel = level;
+        signalPhase = (signalPhase + 0.018 + level / 900) % (Math.PI * 2);
+        const primary = buildWavePoints(level, signalPhase);
+        const trail = buildWavePoints(level * 0.58, signalPhase - 0.9, 0.7);
+        els.signalWaveGlow.setAttribute("points", primary);
+        els.signalWavePrimary.setAttribute("points", primary);
+        els.signalWaveTrail.setAttribute("points", trail);
+      }
+
+      function setSignal(peak) {
+        const level = signalLevelFromPeak(peak);
+        signalPeak = peak === 0 ? 0 : Math.max(signalPeak * 0.86, level);
+        els.level.style.width = `${level}%`;
+        els.signalPanel.style.setProperty("--signal-level", `${signalPeak}%`);
+        els.signalValue.textContent = `${Math.round(signalPeak)}%`;
+        els.signalState.textContent = signalStateForPeak(peak);
+        updateSignalWave(signalPeak, peak === 0);
+      }
+
       function pcm16Base64(samples) {
         const bytes = new Uint8Array(samples.length * 2);
         const view = new DataView(bytes.buffer);
@@ -494,7 +786,7 @@
           const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
           view.setInt16(i * 2, int16, true);
         }
-        els.level.style.width = `${Math.min(100, peak * 140)}%`;
+        setSignal(peak);
 
         let binary = "";
         const chunk = 0x8000;
@@ -547,7 +839,7 @@
           }
           if (rest) lines.push(rest);
         }
-        return lines.slice(-12);
+        return lines;
       }
 
       function renderTranscript(text) {
@@ -641,7 +933,7 @@
             } else if (event.type === "conversation.item.input_audio_transcription.completed") {
               renderTranscript(event.transcript || transcriptText);
               setText(els.final, event.transcript || transcriptText);
-              setSocket("completed", true);
+              if (!isRecording) setSocket("completed", true);
             } else if (event.type === "error") {
               log(event.error?.message || "error", "error");
             } else {
@@ -686,7 +978,7 @@
         els.start.disabled = false;
         els.stop.disabled = true;
         setAudio("idle");
-        els.level.style.width = "0%";
+        setSignal(0);
       }
 
       function stop() {
@@ -705,6 +997,7 @@
 
       setSocket("idle");
       setAudio("idle");
+      setSignal(0);
       log(realtimeUrl());
     </script>
   </body>

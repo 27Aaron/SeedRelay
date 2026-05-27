@@ -186,7 +186,11 @@ async fn handle_realtime_socket(
                         }
                     }
                     AsrEvent::FinalResult(text) if !text.is_empty() => {
-                        final_transcript.push_str(&text);
+                        if let Some(transcript) =
+                            append_final_transcript(&mut final_transcript, &text)
+                        {
+                            send_json(&mut write, transcript_completed_event(&item_id, &transcript)).await?;
+                        }
                     }
                     AsrEvent::SessionFinished => {
                         send_json(&mut write, transcript_completed_event(&item_id, &final_transcript)).await?;
@@ -281,6 +285,14 @@ fn interim_delta(previous: &mut String, current: &str) -> String {
     delta
 }
 
+fn append_final_transcript(transcript: &mut String, text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    transcript.push_str(text);
+    Some(transcript.clone())
+}
+
 fn bad_request_response(error: anyhow::Error) -> ErrorResponse {
     Response::builder()
         .status(StatusCode::BAD_REQUEST)
@@ -321,7 +333,7 @@ fn even_pcm_bytes(pcm16: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::interim_delta;
+    use super::{append_final_transcript, interim_delta};
 
     #[test]
     fn interim_delta_sends_only_new_suffix_for_growing_snapshots() {
@@ -339,5 +351,20 @@ mod tests {
 
         assert_eq!(interim_delta(&mut previous, "您好"), "您好");
         assert_eq!(previous, "您好");
+    }
+
+    #[test]
+    fn append_final_transcript_returns_live_snapshot() {
+        let mut transcript = String::new();
+
+        assert_eq!(
+            append_final_transcript(&mut transcript, "你好啊，"),
+            Some("你好啊，".to_string())
+        );
+        assert_eq!(
+            append_final_transcript(&mut transcript, "hello。"),
+            Some("你好啊，hello。".to_string())
+        );
+        assert_eq!(transcript, "你好啊，hello。");
     }
 }
