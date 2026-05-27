@@ -4,5 +4,16 @@ services:
     container_name: seedrelay
     ports:
       - "8000:8000"
-    command: ["./seedrelay", "--host", "0.0.0.0"]
+    command:
+      - "./seedrelay"
+      - "--host"
+      - "0.0.0.0"
+      # - "--port"
+      # - "8080"
+      # - "--model"
+      # - "seed-asr"
+      # - "--api-key"
+      # - "your-secret-key"
+      # - "--webui"
+      # - "--reset"
     restart: unless-stopped
