@@ -50,6 +50,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libopus-dev cmake gcc-aarch64-linux-gnu
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            mkdir -p .cargo
+            echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
+            echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
+          fi
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
