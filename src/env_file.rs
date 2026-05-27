@@ -1,6 +1,6 @@
-pub(crate) type EnvEntries = Vec<(String, String)>;
+pub type EnvEntries = Vec<(String, String)>;
 
-pub(crate) fn parse_env(contents: &str) -> EnvEntries {
+pub fn parse_env(contents: &str) -> EnvEntries {
     contents
         .lines()
         .filter_map(|line| {

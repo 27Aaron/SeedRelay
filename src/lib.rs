@@ -3,7 +3,7 @@ pub mod cli;
 pub mod client;
 pub mod config;
 pub mod credentials;
-pub(crate) mod env_file;
+pub mod env_file;
 pub mod protocol;
 pub mod realtime;
 pub mod response;
