@@ -11,15 +11,15 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.platform }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
-            artifact: seedrelay-linux-amd64
-          - target: aarch64-unknown-linux-gnu
-            artifact: seedrelay-linux-arm64
+          - platform: amd64
+            target: x86_64-unknown-linux-gnu
+          - platform: arm64
+            target: aarch64-unknown-linux-gnu
 
     steps:
       - uses: actions/checkout@v4
@@ -47,29 +47,10 @@ jobs:
           CMAKE_POLICY_VERSION_MINIMUM: 3.5
         run: cargo build --release --target ${{ matrix.target }}
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/seedrelay
-
-  release-image:
-    name: Create multi-arch Docker image
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: binaries
-
-      - run: |
-          chmod +x binaries/seedrelay-linux-amd64/seedrelay
-          chmod +x binaries/seedrelay-linux-arm64/seedrelay
+      - name: Prepare binary for Docker
+        run: |
+          cp target/${{ matrix.target }}/release/seedrelay seedrelay
+          chmod +x seedrelay
 
       - uses: docker/login-action@v3
         with:
@@ -77,15 +58,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -93,8 +68,35 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/${{ matrix.platform }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}-${{ matrix.platform }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  manifest:
+    name: Create multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}-arm64
