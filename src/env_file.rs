@@ -14,7 +14,7 @@ pub fn parse_env(contents: &str) -> EnvEntries {
         .collect()
 }
 
-pub(crate) fn env_value(entries: &[(String, String)], key: &str) -> Option<String> {
+pub fn env_value(entries: &[(String, String)], key: &str) -> Option<String> {
     entries
         .iter()
         .rev()
