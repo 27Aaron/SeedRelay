@@ -46,7 +46,7 @@ Streaming transcript events back to client
 ### Build
 
 ```bash
-git clone https://github.com/27Aaron/seed-asr2api.git
+git clone https://github.com/27Aaron/SeedRelay.git
 cd seed-asr2api
 cp .env.example .env
 cargo build --release
