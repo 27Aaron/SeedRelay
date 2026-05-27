@@ -1,32 +1,26 @@
-use std::net::SocketAddr;
-use std::path::PathBuf;
-
 use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "seedrelay",
-    about = "SeedRelay: local OpenAI-style Realtime transcription bridge for Seed-ASR 2.0"
+    about = "SeedRelay: local OpenAI-style Realtime transcription bridge for Seed-ASR"
 )]
 pub struct Cli {
-    #[arg(long, value_name = "ADDR")]
-    pub bind: Option<SocketAddr>,
+    #[arg(long, default_value = "0.0.0.0")]
+    pub host: String,
 
-    #[arg(long, value_name = "PATH")]
-    pub env_path: Option<PathBuf>,
+    #[arg(long, default_value_t = 8000)]
+    pub port: u16,
 
-    #[arg(long, value_name = "MODEL")]
-    pub model: Option<String>,
+    #[arg(long, default_value = "seed-asr")]
+    pub model: String,
 
-    #[arg(long, value_name = "KEY")]
+    #[arg(long)]
     pub api_key: Option<String>,
 
     #[arg(long)]
-    pub reset_credentials: bool,
+    pub webui: bool,
 
     #[arg(long)]
-    pub debug: bool,
-
-    #[arg(long)]
-    pub web: bool,
+    pub reset: bool,
 }
