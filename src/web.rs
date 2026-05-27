@@ -1,4 +1,6 @@
 pub const INDEX_HTML: &str = include_str!("../web/index.html");
+pub const STYLES_CSS: &str = include_str!("../web/styles.css");
+pub const APP_JS: &str = include_str!("../web/app.js");
 
 pub fn http_response(method: &str, target: &str) -> Option<String> {
     let path = target.split('?').next().unwrap_or(target);
@@ -9,10 +11,34 @@ pub fn http_response(method: &str, target: &str) -> Option<String> {
             INDEX_HTML,
             false,
         )),
+        ("GET", "/styles.css") => Some(response(
+            "200 OK",
+            "text/css; charset=utf-8",
+            STYLES_CSS,
+            false,
+        )),
+        ("GET", "/app.js") => Some(response(
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            APP_JS,
+            false,
+        )),
         ("HEAD", "/") | ("HEAD", "/index.html") => Some(response(
             "200 OK",
             "text/html; charset=utf-8",
             INDEX_HTML,
+            true,
+        )),
+        ("HEAD", "/styles.css") => Some(response(
+            "200 OK",
+            "text/css; charset=utf-8",
+            STYLES_CSS,
+            true,
+        )),
+        ("HEAD", "/app.js") => Some(response(
+            "200 OK",
+            "application/javascript; charset=utf-8",
+            APP_JS,
             true,
         )),
         ("GET", "/health") => Some(response(
