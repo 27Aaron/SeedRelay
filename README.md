@@ -14,10 +14,9 @@ SeedRelay is a lightweight local server that exposes an OpenAI Realtime API endp
 - **OpenAI-compatible** — Implements the `/v1/realtime` WebSocket endpoint with session management, audio streaming, and transcript events
 - **Streaming Transcription** — Real-time interim results and final transcripts
 - **Audio Processing** — Automatic sample rate conversion and Opus encoding
-- **Built-in Web UI** — Live testing interface with audio visualization (`--web`)
+- **Built-in Web UI** — Live testing interface with audio visualization (`--webui`)
 - **API Key Auth** — Optional `api_key` parameter enforcement
 - **Zero-config Credentials** — Automatic device registration and token management
-- **Debug Mode** — Verbose logging for troubleshooting (`--debug`)
 
 ## Architecture
 
@@ -48,61 +47,45 @@ Streaming transcript events back to client
 ```bash
 git clone https://github.com/27Aaron/SeedRelay.git
 cd SeedRelay
-cp .env.example .env
 cargo build --release
 ```
 
 ### Run
 
 ```bash
+# Start with default settings
+./target/release/seedrelay
+
 # Start with web UI
-cargo run --release -- --web
+./target/release/seedrelay --webui
 
-# With debug logging
-cargo run --release -- --web --debug
-
-# Custom bind address
-cargo run --release -- --bind 0.0.0.0:8080 --web
+# Custom host and port
+./target/release/seedrelay --host 0.0.0.0 --port 8080
 
 # With API key
-cargo run --release -- --api-key your-secret-key --web
+./target/release/seedrelay --api-key your-secret-key --webui
 ```
 
-First run will automatically register a device and obtain credentials. These are saved to `.env` for subsequent runs.
+First run will automatically register a device and obtain credentials. These are saved to `.seedrelay/credentials.json` in the current working directory.
 
 ## CLI Reference
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--bind <ADDR>` | `127.0.0.1:8000` | Server bind address |
-| `--env-path <PATH>` | `.env` | Path to environment file |
+| `--host <ADDR>` | `0.0.0.0` | Server listen address |
+| `--port <PORT>` | `8000` | Server listen port |
 | `--model <MODEL>` | `seed-asr` | ASR model identifier |
 | `--api-key <KEY>` | *(disabled)* | Require this API key from clients |
-| `--web` | off | Enable built-in web testing UI |
-| `--debug` | off | Enable verbose debug logging |
-| `--reset-credentials` | off | Force device re-registration |
+| `--webui` | off | Enable built-in web testing UI |
+| `--reset` | off | Reset device credentials and re-register |
 
-## Configuration
-
-Edit `.env` for persistent settings. CLI flags take precedence.
+## Docker
 
 ```bash
-host=127.0.0.1    # Server host
-port=8000         # Server port
-model=seed-asr    # Model name
-api_key=          # Optional API key (empty = disabled)
+docker compose up -d
 ```
 
-Credentials below are auto-managed — do not edit manually:
-
-```bash
-device_id=        # Auto-filled after registration
-install_id=       # Auto-filled after registration
-cdid=             # Auto-filled after registration
-openudid=         # Auto-filled after registration
-clientudid=       # Auto-filled after registration
-token=            # Auto-filled after registration
-```
+Customize via `command:` in `compose.yaml`.
 
 ## API
 
@@ -150,7 +133,7 @@ ws://127.0.0.1:8000/v1/realtime?model=seed-asr[&api_key=...]
 src/
 ├── main.rs            # Entry point
 ├── cli.rs             # CLI argument definitions
-├── config.rs          # Environment & config loading
+├── config.rs          # Config resolution
 ├── server.rs          # WebSocket server & connection handling
 ├── client.rs          # Doubao backend WebSocket client
 ├── credentials.rs     # Device registration & token management
