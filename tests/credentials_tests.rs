@@ -1,24 +1,20 @@
-use std::time::Duration;
-
-use seedrelay::credentials::{
-    default_env_path, ensure_credentials, is_jwt_expired, CachedCredentials,
-};
+use seedrelay::credentials::{default_credentials_path, is_jwt_expired, CachedCredentials};
 
 #[test]
-fn default_env_path_uses_current_directory_dotenv() {
-    let path = default_env_path();
+fn default_credentials_path_points_to_seedrelay_dir() {
+    let path = default_credentials_path();
 
+    assert!(path.to_string_lossy().contains("seedrelay"));
     assert_eq!(
-        path.file_name().and_then(|value| value.to_str()),
-        Some(".env")
+        path.file_name().and_then(|v| v.to_str()),
+        Some("credentials.json")
     );
 }
 
 #[test]
-fn credentials_round_trip_through_dotenv_file() {
+fn credentials_round_trip_through_json_file() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "").expect("create env");
+    let path = dir.path().join("credentials.json");
     let credentials = CachedCredentials {
         device_id: "device-1".to_string(),
         install_id: "install-1".to_string(),
@@ -35,10 +31,9 @@ fn credentials_round_trip_through_dotenv_file() {
 }
 
 #[test]
-fn saving_credentials_preserves_unrelated_dotenv_keys() {
+fn saving_credentials_creates_parent_directory() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "APP_MODE=dev\ndevice_id=old\n").expect("write env");
+    let path = dir.path().join("nested").join("credentials.json");
     let credentials = CachedCredentials {
         device_id: "device-2".to_string(),
         install_id: "install-2".to_string(),
@@ -48,54 +43,21 @@ fn saving_credentials_preserves_unrelated_dotenv_keys() {
         token: "token-2".to_string(),
     };
 
-    credentials.save(&path).expect("save credentials");
-    let contents = std::fs::read_to_string(&path).expect("read env");
+    credentials.save(&path).expect("save creates parent dir");
+    let loaded = CachedCredentials::load(&path).expect("load credentials");
 
-    assert!(contents.contains("APP_MODE=dev"));
-    assert!(contents.contains("device_id=device-2"));
-    assert!(contents.contains("install_id=install-2"));
-    assert!(contents.contains("token=token-2"));
-    assert!(!contents.contains("device_id=old"));
+    assert_eq!(loaded.device_id, "device-2");
 }
 
 #[test]
-fn saving_credentials_requires_existing_dotenv_file() {
+fn loading_invalid_json_fails() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    let credentials = CachedCredentials {
-        device_id: "device-3".to_string(),
-        install_id: "install-3".to_string(),
-        cdid: "cdid-3".to_string(),
-        openudid: "openudid-3".to_string(),
-        clientudid: "clientudid-3".to_string(),
-        token: "token-3".to_string(),
-    };
+    let path = dir.path().join("credentials.json");
+    std::fs::write(&path, "not json").expect("write invalid");
 
-    let error = credentials
-        .save(&path)
-        .expect_err("missing env should fail");
-    let message = format!("{error:#}");
+    let error = CachedCredentials::load(&path).expect_err("invalid json should fail");
 
-    assert!(message.contains("Missing .env file"));
-    assert!(message.contains("cp .env.example .env"));
-}
-
-#[tokio::test]
-async fn ensure_credentials_requires_existing_dotenv_file() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(1))
-        .build()
-        .expect("client");
-
-    let error = ensure_credentials(&client, &path, false)
-        .await
-        .expect_err("missing env should fail");
-    let message = format!("{error:#}");
-
-    assert!(message.contains("Missing .env file"));
-    assert!(message.contains("cp .env.example .env"));
+    assert!(error.to_string().contains("invalid credentials file"));
 }
 
 #[test]

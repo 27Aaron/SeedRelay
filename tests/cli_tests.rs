@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use clap::Parser;
 use seedrelay::cli::Cli;
 
@@ -7,34 +5,26 @@ use seedrelay::cli::Cli;
 fn parses_default_server_cli() {
     let cli = Cli::parse_from(["seedrelay"]);
 
-    assert!(cli.bind.is_none());
-    assert!(cli.model.is_none());
+    assert_eq!(cli.host, "0.0.0.0");
+    assert_eq!(cli.port, 8000);
+    assert_eq!(cli.model, "seed-asr");
     assert!(cli.api_key.is_none());
-    assert!(!cli.debug);
-    assert!(!cli.reset_credentials);
-    assert!(!cli.web);
+    assert!(!cli.webui);
 }
 
 #[test]
-fn parses_bind_override_flag() {
-    let cli = Cli::parse_from(["seedrelay", "--bind", "0.0.0.0:9000"]);
+fn parses_host_and_port_flags() {
+    let cli = Cli::parse_from(["seedrelay", "--host", "127.0.0.1", "--port", "9000"]);
 
-    assert_eq!(cli.bind.unwrap().to_string(), "0.0.0.0:9000");
+    assert_eq!(cli.host, "127.0.0.1");
+    assert_eq!(cli.port, 9000);
 }
 
 #[test]
-fn parses_web_server_flag() {
-    let cli = Cli::parse_from(["seedrelay", "--web", "--debug"]);
+fn parses_webui_flag() {
+    let cli = Cli::parse_from(["seedrelay", "--webui"]);
 
-    assert!(cli.web);
-    assert!(cli.debug);
-}
-
-#[test]
-fn parses_env_path_flag() {
-    let cli = Cli::parse_from(["seedrelay", "--env-path", "/tmp/seedrelay.env"]);
-
-    assert_eq!(cli.env_path, Some(PathBuf::from("/tmp/seedrelay.env")));
+    assert!(cli.webui);
 }
 
 #[test]
@@ -47,6 +37,6 @@ fn parses_model_and_api_key_flags() {
         "local-secret",
     ]);
 
-    assert_eq!(cli.model.as_deref(), Some("custom-asr"));
+    assert_eq!(cli.model, "custom-asr");
     assert_eq!(cli.api_key.as_deref(), Some("local-secret"));
 }

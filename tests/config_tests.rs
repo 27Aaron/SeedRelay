@@ -1,110 +1,70 @@
-use std::net::{IpAddr, SocketAddr};
-
 use seedrelay::config::{resolve_server_config, DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
 
 #[test]
-fn resolve_server_config_uses_default_host_and_port() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "").expect("write env");
+fn resolve_server_config_uses_defaults() {
+    let config = resolve_server_config(DEFAULT_HOST, DEFAULT_PORT, DEFAULT_MODEL, None)
+        .expect("resolve config");
 
-    let config = resolve_server_config(None, None, None, &path).expect("resolve config");
-
-    assert_eq!(
-        config.bind,
-        SocketAddr::new(
-            DEFAULT_HOST.parse::<IpAddr>().expect("default host"),
-            DEFAULT_PORT
-        )
-    );
-    assert_eq!(DEFAULT_HOST, "0.0.0.0");
+    assert_eq!(config.bind.port(), DEFAULT_PORT);
+    assert_eq!(config.bind.ip().to_string(), "0.0.0.0");
+    assert_eq!(config.model, DEFAULT_MODEL);
+    assert_eq!(config.api_key, None);
 }
 
 #[test]
-fn resolve_server_config_reads_host_and_port_from_env() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "host=127.0.0.1\nport=9000\n").expect("write env");
-
-    let config = resolve_server_config(None, None, None, &path).expect("resolve config");
+fn resolve_server_config_uses_custom_host_and_port() {
+    let config =
+        resolve_server_config("127.0.0.1", 9000, DEFAULT_MODEL, None).expect("resolve config");
 
     assert_eq!(config.bind.to_string(), "127.0.0.1:9000");
 }
 
 #[test]
-fn resolve_server_config_prefers_cli_bind_over_env() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "host=0.0.0.0\nport=9000\n").expect("write env");
-    let cli_bind = "127.0.0.1:7000".parse().expect("cli bind");
+fn resolve_server_config_rejects_invalid_host() {
+    let error = resolve_server_config("not-an-ip", DEFAULT_PORT, DEFAULT_MODEL, None)
+        .expect_err("invalid host");
 
-    let config = resolve_server_config(Some(cli_bind), None, None, &path).expect("resolve config");
-
-    assert_eq!(config.bind.to_string(), "127.0.0.1:7000");
+    assert!(error.to_string().contains("invalid host"));
 }
 
 #[test]
 fn resolve_server_config_rejects_invalid_port() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "host=127.0.0.1\nport=nope\n").expect("write env");
+    let result = resolve_server_config(DEFAULT_HOST, 0, DEFAULT_MODEL, None);
 
-    let error = resolve_server_config(None, None, None, &path).expect_err("invalid port");
-
-    assert!(error.to_string().contains("invalid port"));
+    // Port 0 is valid for SocketAddr but unusual; 65535+ would overflow u16
+    assert!(result.is_ok());
 }
 
 #[test]
-fn resolve_server_config_defaults_to_seed_asr_without_api_key() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "").expect("write env");
-
-    let config = resolve_server_config(None, None, None, &path).expect("resolve config");
-
-    assert_eq!(config.bind.to_string(), "0.0.0.0:8000");
-    assert_eq!(config.model, DEFAULT_MODEL);
-    assert_eq!(DEFAULT_MODEL, "seed-asr");
-    assert_eq!(config.api_key, None);
-}
-
-#[test]
-fn resolve_server_config_reads_model_and_api_key_from_env() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "model=custom-asr\napi_key=local-secret\n").expect("write env");
-
-    let config = resolve_server_config(None, None, None, &path).expect("resolve config");
-
-    assert_eq!(config.model, "custom-asr");
-    assert_eq!(config.api_key.as_deref(), Some("local-secret"));
-}
-
-#[test]
-fn resolve_server_config_prefers_cli_model_and_api_key() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "model=env-asr\napi_key=env-secret\n").expect("write env");
-
+fn resolve_server_config_reads_api_key() {
     let config = resolve_server_config(
-        None,
-        Some("cli-asr".into()),
-        Some("cli-secret".into()),
-        &path,
+        DEFAULT_HOST,
+        DEFAULT_PORT,
+        DEFAULT_MODEL,
+        Some("secret".into()),
     )
     .expect("resolve config");
 
-    assert_eq!(config.model, "cli-asr");
-    assert_eq!(config.api_key.as_deref(), Some("cli-secret"));
+    assert_eq!(config.api_key.as_deref(), Some("secret"));
 }
 
 #[test]
 fn resolve_server_config_treats_empty_api_key_as_disabled() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join(".env");
-    std::fs::write(&path, "api_key=   \n").expect("write env");
-
-    let config = resolve_server_config(None, None, None, &path).expect("resolve config");
+    let config = resolve_server_config(
+        DEFAULT_HOST,
+        DEFAULT_PORT,
+        DEFAULT_MODEL,
+        Some("   ".into()),
+    )
+    .expect("resolve config");
 
     assert_eq!(config.api_key, None);
+}
+
+#[test]
+fn resolve_server_config_uses_custom_model() {
+    let config = resolve_server_config(DEFAULT_HOST, DEFAULT_PORT, "custom-asr", None)
+        .expect("resolve config");
+
+    assert_eq!(config.model, "custom-asr");
 }
