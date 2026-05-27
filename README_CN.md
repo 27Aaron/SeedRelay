@@ -47,7 +47,7 @@ Seed-ASR 后端
 
 ```bash
 git clone https://github.com/27Aaron/SeedRelay.git
-cd seed-asr2api
+cd SeedRelay
 cp .env.example .env
 cargo build --release
 ```
