@@ -10,6 +10,7 @@ fn parses_default_server_cli() {
     assert!(cli.bind.is_none());
     assert!(cli.model.is_none());
     assert!(cli.api_key.is_none());
+    assert!(!cli.debug);
     assert!(!cli.reset_credentials);
     assert!(!cli.web);
 }
@@ -23,9 +24,10 @@ fn parses_bind_override_flag() {
 
 #[test]
 fn parses_web_server_flag() {
-    let cli = Cli::parse_from(["seedrelay", "--web"]);
+    let cli = Cli::parse_from(["seedrelay", "--web", "--debug"]);
 
     assert!(cli.web);
+    assert!(cli.debug);
 }
 
 #[test]

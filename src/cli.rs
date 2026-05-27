@@ -25,5 +25,8 @@ pub struct Cli {
     pub reset_credentials: bool,
 
     #[arg(long)]
+    pub debug: bool,
+
+    #[arg(long)]
     pub web: bool,
 }

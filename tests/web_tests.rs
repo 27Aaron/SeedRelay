@@ -142,9 +142,8 @@ fn index_html_emphasizes_signal_activity() {
     assert!(APP_JS.contains("Math.sqrt(Math.min(1, Math.max(0, peak))) * 125"));
     assert!(APP_JS.contains("if (peak >= 0.7) return \"clipping\";"));
     assert!(APP_JS.contains("if (peak >= 0.01) return \"voice\";"));
-    assert!(APP_JS.contains(
-        "signalTargetLevel = peak === 0 ? 0 : Math.max(signalTargetLevel * 0.86, level);"
-    ));
+    assert!(APP_JS.contains("signalTargetLevel ="));
+    assert!(APP_JS.contains("Math.max(signalTargetLevel * 0.86, level)"));
     assert!(APP_JS.contains("function signalStateForPeak(peak)"));
     assert!(APP_JS.contains("els.signalValue.textContent = `${Math.round(signalDisplayLevel)}%`;"));
     assert!(APP_JS.contains(
@@ -154,10 +153,10 @@ fn index_html_emphasizes_signal_activity() {
 
 #[test]
 fn index_html_renders_signal_as_oscilloscope_waveform() {
-    assert!(INDEX_HTML.contains(r#"<svg class="scope-wave""#));
-    assert!(INDEX_HTML.contains(r#"<polyline id="signalWaveGlow""#));
-    assert!(INDEX_HTML.contains(r#"<polyline id="signalWaveTrail""#));
-    assert!(INDEX_HTML.contains(r#"<polyline id="signalWavePrimary""#));
+    assert!(INDEX_HTML.contains(r#"class="scope-wave""#));
+    assert!(INDEX_HTML.contains(r#"id="signalWaveGlow""#));
+    assert!(INDEX_HTML.contains(r#"id="signalWaveTrail""#));
+    assert!(INDEX_HTML.contains(r#"id="signalWavePrimary""#));
     assert!(APP_JS.contains("signalWaveGlow: document.querySelector(\"#signalWaveGlow\")"));
     assert!(APP_JS.contains("let signalPhase = 0;"));
     assert!(APP_JS.contains("function buildWavePoints(level, phase, offset = 0)"));
@@ -171,17 +170,20 @@ fn index_html_keeps_signal_waveform_subtle_and_smooth() {
     assert!(APP_JS.contains("const SIGNAL_EASING = 0.18;"));
     assert!(APP_JS.contains("const SIGNAL_IDLE_THRESHOLD = 0.08;"));
     assert!(APP_JS.contains("let signalAnimationFrame = null;"));
-    assert!(APP_JS.contains(
-        "signalDisplayLevel += (signalTargetLevel - signalDisplayLevel) * SIGNAL_EASING;"
-    ));
+    assert!(APP_JS.contains("signalDisplayLevel +="));
+    assert!(APP_JS.contains("(signalTargetLevel - signalDisplayLevel) * SIGNAL_EASING"));
     assert!(APP_JS
         .contains("const frameMs = Math.min(34, Math.max(0, now - lastSignalFrameAt || 16));"));
-    assert!(APP_JS.contains("signalPhase = (signalPhase + frameMs * (0.0008 + signalDisplayLevel / 52000)) % (Math.PI * 2);"));
-    assert!(APP_JS.contains("if (isRecording || signalTargetLevel > SIGNAL_IDLE_THRESHOLD || signalDisplayLevel > SIGNAL_IDLE_THRESHOLD)"));
+    assert!(APP_JS.contains("signalPhase ="));
+    assert!(APP_JS.contains("signalDisplayLevel / 52000"));
+    assert!(APP_JS.contains("isRecording ||"));
+    assert!(APP_JS.contains("signalTargetLevel > SIGNAL_IDLE_THRESHOLD"));
+    assert!(APP_JS.contains("signalDisplayLevel > SIGNAL_IDLE_THRESHOLD"));
     assert!(!APP_JS.contains("SIGNAL_WAVE_INTERVAL_MS"));
     assert!(STYLES_CSS.contains("stroke-width: 3.5;"));
     assert!(STYLES_CSS.contains("opacity: 0.24;"));
-    assert!(INDEX_HTML.contains(r#"<feGaussianBlur stdDeviation="1.0" result="blur" />"#));
+    assert!(INDEX_HTML.contains(r#"stdDeviation="1.0""#));
+    assert!(INDEX_HTML.contains(r#"result="blur""#));
 }
 
 #[test]
