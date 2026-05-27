@@ -1,18 +1,15 @@
-FROM rust:alpine AS builder
+FROM --platform=$BUILDPLATFORM alpine:3.23 AS builder-amd64
+COPY binaries/seedrelay-linux-amd64/seedrelay /tmp/seedrelay
 
-RUN apk add --no-cache musl-dev cmake make gcc g++
+FROM --platform=$BUILDPLATFORM alpine:3.23 AS builder-arm64
+COPY binaries/seedrelay-linux-arm64/seedrelay /tmp/seedrelay
 
-WORKDIR /usr/src/seedrelay
-COPY . .
-RUN CMAKE_POLICY_VERSION_MINIMUM=3.5 cargo build --release
+FROM builder-amd64 AS builder-default
 
 FROM alpine:3.23
-
 RUN apk add --no-cache ca-certificates opus
-
+ARG TARGETARCH
+COPY --from=builder-${TARGETARCH} /tmp/seedrelay /app/seedrelay
 WORKDIR /app
-COPY --from=builder /usr/src/seedrelay/target/release/seedrelay .
-
 EXPOSE 8000
-
 CMD ["./seedrelay", "--host", "0.0.0.0"]
