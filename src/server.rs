@@ -141,6 +141,7 @@ async fn handle_realtime_socket(
     let mut pcm_tx = Some(pcm_tx);
     let mut converter = Pcm16Converter::new(24_000);
     let item_id = format!("item_{}", Uuid::new_v4().simple());
+    let mut interim_transcript = String::new();
     let mut final_transcript = String::new();
 
     let asr_task =
@@ -179,7 +180,10 @@ async fn handle_realtime_socket(
                 };
                 match event {
                     AsrEvent::InterimResult(text) if !text.is_empty() => {
-                        send_json(&mut write, transcript_delta_event(&item_id, &text)).await?;
+                        let delta = interim_delta(&mut interim_transcript, &text);
+                        if !delta.is_empty() {
+                            send_json(&mut write, transcript_delta_event(&item_id, &delta)).await?;
+                        }
                     }
                     AsrEvent::FinalResult(text) if !text.is_empty() => {
                         final_transcript.push_str(&text);
@@ -267,6 +271,16 @@ fn decode_socket_message(message: Message) -> Result<String> {
     }
 }
 
+fn interim_delta(previous: &mut String, current: &str) -> String {
+    let delta = current
+        .strip_prefix(previous.as_str())
+        .unwrap_or(current)
+        .to_string();
+    previous.clear();
+    previous.push_str(current);
+    delta
+}
+
 fn bad_request_response(error: anyhow::Error) -> ErrorResponse {
     Response::builder()
         .status(StatusCode::BAD_REQUEST)
@@ -303,4 +317,27 @@ impl Pcm16Converter {
 fn even_pcm_bytes(pcm16: &[u8]) -> Vec<u8> {
     let even_len = pcm16.len() - (pcm16.len() % 2);
     pcm16[..even_len].to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::interim_delta;
+
+    #[test]
+    fn interim_delta_sends_only_new_suffix_for_growing_snapshots() {
+        let mut previous = String::new();
+
+        assert_eq!(interim_delta(&mut previous, "你好"), "你好");
+        assert_eq!(interim_delta(&mut previous, "你好啊"), "啊");
+        assert_eq!(interim_delta(&mut previous, "你好啊，你是谁"), "，你是谁");
+        assert_eq!(previous, "你好啊，你是谁");
+    }
+
+    #[test]
+    fn interim_delta_resends_current_text_when_snapshot_is_rewritten() {
+        let mut previous = "你好啊".to_string();
+
+        assert_eq!(interim_delta(&mut previous, "您好"), "您好");
+        assert_eq!(previous, "您好");
+    }
 }

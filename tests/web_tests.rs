@@ -25,6 +25,39 @@ fn index_html_stops_capture_before_committing_audio() {
 }
 
 #[test]
+fn index_html_keeps_brand_on_one_line() {
+    assert!(INDEX_HTML.contains(r#"<h1 class="wordmark">Seed Relay</h1>"#));
+    assert!(INDEX_HTML.contains("white-space: nowrap;"));
+    assert!(INDEX_HTML.contains("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);"));
+    assert!(INDEX_HTML.contains("@media (max-width: 520px)"));
+    assert!(INDEX_HTML.contains("flex-direction: column;"));
+    assert!(!INDEX_HTML.contains("Seed<br />Relay"));
+}
+
+#[test]
+fn index_html_renders_transcript_sections() {
+    assert!(INDEX_HTML.contains(r#"<div class="label label-row">"#));
+    assert!(INDEX_HTML.contains(r#"<span class="live-dot" aria-hidden="true"></span>"#));
+    assert!(INDEX_HTML.contains(r#"id="partial""#));
+    assert!(INDEX_HTML.contains("transcript-line"));
+    assert!(INDEX_HTML.contains("line-index"));
+    assert!(INDEX_HTML.contains("line-text"));
+    assert!(INDEX_HTML.contains(r#"data-placeholder="Listening transcript appears here""#));
+    assert!(INDEX_HTML.contains(r#"<div class="final-wrap">"#));
+    assert!(INDEX_HTML.contains(r#"<div class="final-label">Final</div>"#));
+}
+
+#[test]
+fn index_html_streams_transcript_as_rows() {
+    assert!(INDEX_HTML.contains("const MAX_TRANSCRIPT_LINE = 12;"));
+    assert!(INDEX_HTML.contains("function splitTranscript(text)"));
+    assert!(INDEX_HTML.contains("function renderTranscript(text)"));
+    assert!(INDEX_HTML.contains("appendTranscriptDelta(event.delta || \"\")"));
+    assert!(INDEX_HTML.contains("renderTranscript(event.transcript || transcriptText)"));
+    assert!(!INDEX_HTML.contains("els.partial.textContent + (event.delta || \"\")"));
+}
+
+#[test]
 fn renders_index_page_response() {
     let response = http_response("GET", "/").expect("index response");
 

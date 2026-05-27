@@ -50,6 +50,7 @@
       }
 
       .panel {
+        min-width: 0;
         border: 1px solid var(--line);
         background: color-mix(in srgb, var(--panel) 92%, transparent);
         box-shadow: var(--shadow);
@@ -66,16 +67,21 @@
         justify-content: space-between;
         gap: 12px;
         align-items: flex-start;
+        flex-wrap: wrap;
         padding-bottom: 22px;
         border-bottom: 1px solid var(--line);
       }
 
       h1 {
         margin: 0;
-        font-size: clamp(28px, 5vw, 64px);
-        line-height: 0.92;
+        font-size: clamp(26px, 4.6vw, 58px);
+        line-height: 0.94;
         letter-spacing: 0;
         text-transform: uppercase;
+      }
+
+      .wordmark {
+        white-space: nowrap;
       }
 
       .tag {
@@ -89,7 +95,7 @@
 
       .status-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 10px;
         margin: 20px 0;
       }
@@ -118,7 +124,7 @@
 
       .buttons {
         display: grid;
-        grid-template-columns: 1fr 1fr 44px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
         gap: 10px;
         margin-top: auto;
       }
@@ -164,6 +170,7 @@
       }
 
       .transcript {
+        min-width: 0;
         display: grid;
         grid-template-rows: minmax(240px, 1fr) minmax(180px, 0.64fr);
         gap: 16px;
@@ -175,11 +182,33 @@
         overflow: hidden;
       }
 
+      .readout {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        min-height: 0;
+      }
+
       .label {
         color: var(--muted);
         font-size: 12px;
         text-transform: uppercase;
         margin-bottom: 14px;
+      }
+
+      .label-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .live-dot {
+        width: 8px;
+        height: 8px;
+        background: var(--accent);
+        box-shadow: 0 0 18px rgba(215, 255, 95, 0.56);
       }
 
       #partial,
@@ -190,19 +219,83 @@
       }
 
       #partial {
-        min-height: 150px;
-        font-size: clamp(30px, 6vw, 72px);
-        line-height: 1.04;
+        min-height: 210px;
+        padding: 4px 0 16px;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      #partial.empty::before,
+      #final.empty::before {
+        content: attr(data-placeholder);
+        display: block;
+        color: color-mix(in srgb, var(--muted) 58%, transparent);
+        font-family:
+          ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
+          monospace;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      .transcript-line {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        gap: 12px;
+        align-items: baseline;
+        min-height: 48px;
+        padding: 9px 0;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      }
+
+      .line-index {
+        color: color-mix(in srgb, var(--muted) 70%, transparent);
+        font-size: 11px;
+        font-family:
+          ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas,
+          monospace;
+        text-transform: uppercase;
+      }
+
+      .line-text {
+        color: color-mix(in srgb, var(--ink) 94%, transparent);
+        font-family:
+          "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+        font-size: clamp(20px, 2.2vw, 32px);
+        line-height: 1.32;
         overflow-wrap: anywhere;
+      }
+
+      .transcript-line.active .line-index {
+        color: var(--accent);
+      }
+
+      .transcript-line.active .line-text {
+        color: var(--ink);
+      }
+
+      .final-wrap {
+        min-height: 96px;
+        margin-top: 18px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+        overflow: hidden;
+      }
+
+      .final-label {
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        margin-bottom: 10px;
       }
 
       #final {
         color: var(--accent);
-        margin-top: 22px;
-        padding-top: 18px;
-        border-top: 1px solid var(--line);
         font-size: clamp(18px, 2vw, 28px);
         line-height: 1.35;
+        max-height: 160px;
+        overflow: auto;
         overflow-wrap: anywhere;
       }
 
@@ -232,6 +325,36 @@
           min-height: 430px;
         }
       }
+
+      @media (max-width: 520px) {
+        main {
+          width: min(100vw - 24px, 1180px);
+          padding: 24px 0;
+        }
+
+        .shell {
+          min-height: calc(100vh - 48px);
+        }
+
+        .control,
+        .readout,
+        .events {
+          padding: 22px;
+        }
+
+        .brand {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .wordmark {
+          font-size: clamp(24px, 7vw, 34px);
+        }
+
+        .line-text {
+          font-size: clamp(20px, 6vw, 28px);
+        }
+      }
     </style>
   </head>
   <body>
@@ -239,7 +362,7 @@
       <div class="shell">
         <section class="panel control">
           <div class="brand">
-            <h1>Seed<br />Relay</h1>
+            <h1 class="wordmark">Seed Relay</h1>
             <div class="tag">seed-asr-2.0</div>
           </div>
 
@@ -274,9 +397,23 @@
 
         <section class="transcript">
           <div class="panel readout">
-            <div class="label">Transcript</div>
-            <div id="partial"></div>
-            <div id="final"></div>
+            <div class="label label-row">
+              <span>Transcript</span>
+              <span class="live-dot" aria-hidden="true"></span>
+            </div>
+            <div
+              id="partial"
+              class="empty"
+              data-placeholder="Listening transcript appears here"
+            ></div>
+            <div class="final-wrap">
+              <div class="final-label">Final</div>
+              <div
+                id="final"
+                class="empty"
+                data-placeholder="Completed transcript appears here"
+              ></div>
+            </div>
           </div>
           <div class="panel events">
             <div class="label">Events</div>
@@ -309,6 +446,8 @@
       let mutedOutput = null;
       let frameCount = 0;
       let isRecording = false;
+      let transcriptText = "";
+      const MAX_TRANSCRIPT_LINE = 12;
 
       const workletSource = `
         class CaptureProcessor extends AudioWorkletProcessor {
@@ -370,13 +509,73 @@
         ws.send(JSON.stringify(payload));
       }
 
+      function setText(el, text) {
+        el.textContent = text;
+        el.classList.toggle("empty", !text);
+      }
+
+      function createTranscriptLine(text, index, active) {
+        const row = document.createElement("div");
+        row.className = `transcript-line${active ? " active" : ""}`;
+
+        const number = document.createElement("span");
+        number.className = "line-index";
+        number.textContent = String(index + 1).padStart(2, "0");
+
+        const content = document.createElement("span");
+        content.className = "line-text";
+        content.textContent = text;
+
+        row.append(number, content);
+        return row;
+      }
+
+      function splitTranscript(text) {
+        const normalized = text.replace(/\s+/g, " ").trim();
+        if (!normalized) return [];
+
+        const phrases = normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [normalized];
+        const lines = [];
+        for (const phrase of phrases) {
+          let rest = phrase.trim();
+          while (rest.length > MAX_TRANSCRIPT_LINE) {
+            const slice = rest.slice(0, MAX_TRANSCRIPT_LINE + 1);
+            const spaceBreak = slice.lastIndexOf(" ");
+            const cut = spaceBreak > 6 ? spaceBreak : MAX_TRANSCRIPT_LINE;
+            lines.push(rest.slice(0, cut).trim());
+            rest = rest.slice(cut).trim();
+          }
+          if (rest) lines.push(rest);
+        }
+        return lines.slice(-12);
+      }
+
+      function renderTranscript(text) {
+        transcriptText = text;
+        const lines = splitTranscript(text);
+        els.partial.replaceChildren();
+        els.partial.classList.toggle("empty", lines.length === 0);
+        for (const [index, line] of lines.entries()) {
+          els.partial.append(createTranscriptLine(line, index, index === lines.length - 1));
+        }
+        els.partial.scrollTop = els.partial.scrollHeight;
+      }
+
+      function appendTranscriptDelta(delta) {
+        renderTranscript(transcriptText + delta);
+      }
+
+      function resetTranscript() {
+        renderTranscript("");
+        setText(els.final, "");
+      }
+
       async function start() {
         els.start.disabled = true;
         els.stop.disabled = false;
         frameCount = 0;
         els.frames.textContent = "0";
-        els.partial.textContent = "";
-        els.final.textContent = "";
+        resetTranscript();
         setAudio("requesting");
 
         try {
@@ -438,9 +637,10 @@
           ws.addEventListener("message", (message) => {
             const event = JSON.parse(message.data);
             if (event.type === "conversation.item.input_audio_transcription.delta") {
-              els.partial.textContent += event.delta || "";
+              appendTranscriptDelta(event.delta || "");
             } else if (event.type === "conversation.item.input_audio_transcription.completed") {
-              els.final.textContent = event.transcript || els.partial.textContent;
+              renderTranscript(event.transcript || transcriptText);
+              setText(els.final, event.transcript || transcriptText);
               setSocket("completed", true);
             } else if (event.type === "error") {
               log(event.error?.message || "error", "error");
@@ -499,8 +699,7 @@
       els.start.addEventListener("click", start);
       els.stop.addEventListener("click", stop);
       els.clear.addEventListener("click", () => {
-        els.partial.textContent = "";
-        els.final.textContent = "";
+        resetTranscript();
         els.events.textContent = "";
       });
 
