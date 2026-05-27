@@ -8,6 +8,8 @@ fn parses_default_server_cli() {
     let cli = Cli::parse_from(["seedrelay"]);
 
     assert!(cli.bind.is_none());
+    assert!(cli.model.is_none());
+    assert!(cli.api_key.is_none());
     assert!(!cli.reset_credentials);
     assert!(!cli.web);
 }
@@ -31,4 +33,18 @@ fn parses_env_path_flag() {
     let cli = Cli::parse_from(["seedrelay", "--env-path", "/tmp/seedrelay.env"]);
 
     assert_eq!(cli.env_path, Some(PathBuf::from("/tmp/seedrelay.env")));
+}
+
+#[test]
+fn parses_model_and_api_key_flags() {
+    let cli = Cli::parse_from([
+        "seedrelay",
+        "--model",
+        "custom-asr",
+        "--api-key",
+        "local-secret",
+    ]);
+
+    assert_eq!(cli.model.as_deref(), Some("custom-asr"));
+    assert_eq!(cli.api_key.as_deref(), Some("local-secret"));
 }

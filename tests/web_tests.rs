@@ -1,9 +1,16 @@
-use seedrelay::web::{http_response, APP_JS, INDEX_HTML, STYLES_CSS};
+use seedrelay::web::{
+    http_response, http_response_with_config, WebRuntimeConfig, APP_JS, INDEX_HTML, STYLES_CSS,
+};
 
 #[test]
-fn index_html_uses_seed_asr_realtime_endpoint() {
+fn index_html_loads_runtime_config_for_realtime_endpoint() {
     assert!(INDEX_HTML.contains("<title>SeedRelay</title>"));
-    assert!(APP_JS.contains("/v1/realtime?model=seed-asr-2.0"));
+    assert!(APP_JS.contains("fetch(\"/config.json\""));
+    assert!(APP_JS.contains("model: \"seed-asr\""));
+    assert!(APP_JS.contains("url.searchParams.set(\"model\", runtimeConfig.model);"));
+    assert!(APP_JS.contains("url.searchParams.set(\"api_key\", runtimeConfig.apiKey);"));
+    assert!(APP_JS.contains("displayRealtimeUrl()"));
+    assert!(!APP_JS.contains("/v1/realtime?model=seed-asr-2.0"));
     assert!(APP_JS.contains("input_audio_buffer.append"));
     assert!(APP_JS.contains("conversation.item.input_audio_transcription.delta"));
 }
@@ -37,7 +44,7 @@ fn index_html_keeps_brand_on_one_line() {
     assert!(INDEX_HTML.contains(r#"<h1 class="wordmark" aria-label="Seed Relay">"#));
     assert!(INDEX_HTML.contains(r#"<span>Seed</span>"#));
     assert!(INDEX_HTML.contains(r#"<span>Relay</span>"#));
-    assert!(INDEX_HTML.contains(r#"<div class="tag">Seed-ASR</div>"#));
+    assert!(INDEX_HTML.contains(r#"<div class="tag" id="modelName">seed-asr</div>"#));
     assert!(STYLES_CSS.contains("white-space: nowrap;"));
     assert!(STYLES_CSS.contains("grid-template-columns: minmax(0, 1fr) auto;"));
     assert!(STYLES_CSS.contains("align-items: end;"));
@@ -50,7 +57,6 @@ fn index_html_keeps_brand_on_one_line() {
     assert!(STYLES_CSS.contains("grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);"));
     assert!(STYLES_CSS.contains("@media (max-width: 520px)"));
     assert!(!INDEX_HTML.contains("Seed<br />Relay"));
-    assert!(!INDEX_HTML.contains("ByteDance/Seed-ASR"));
     assert!(!INDEX_HTML.contains("seed-asr-2.0</div>"));
 }
 
@@ -224,6 +230,29 @@ fn serves_static_web_assets() {
     assert!(js.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(js.contains("content-type: application/javascript; charset=utf-8\r\n"));
     assert!(js.contains("requestAnimationFrame(drawSignalFrame);"));
+}
+
+#[test]
+fn serves_runtime_web_config() {
+    let config = WebRuntimeConfig {
+        model: "custom-asr".into(),
+        api_key: Some("local-secret".into()),
+    };
+    let response =
+        http_response_with_config("GET", "/config.json", &config).expect("config response");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("content-type: application/json; charset=utf-8\r\n"));
+    assert!(response.contains(r#""model":"custom-asr""#));
+    assert!(response.contains(r#""apiKey":"local-secret""#));
+}
+
+#[test]
+fn default_runtime_web_config_has_no_api_key() {
+    let response = http_response("GET", "/config.json").expect("config response");
+
+    assert!(response.contains(r#""model":"seed-asr""#));
+    assert!(response.contains(r#""apiKey":null"#));
 }
 
 #[test]

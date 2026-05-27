@@ -1,110 +1,153 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SeedRelay</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <main>
-      <div class="shell">
-        <aside class="side">
-          <section class="panel control">
-            <div class="brand">
-              <h1 class="wordmark" aria-label="Seed Relay">
-                <span>Seed</span>
-                <span>Relay</span>
-              </h1>
-              <div class="tag">Seed-ASR</div>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>SeedRelay</title>
+        <link rel="stylesheet" href="/styles.css" />
+    </head>
+    <body>
+        <main>
+            <div class="shell">
+                <aside class="side">
+                    <section class="panel control">
+                        <div class="brand">
+                            <h1 class="wordmark" aria-label="Seed Relay">
+                                <span>Seed</span>
+                                <span>Relay</span>
+                            </h1>
+                            <div class="tag" id="modelName">seed-asr</div>
+                        </div>
+
+                        <div class="status-grid">
+                            <div class="metric">
+                                <span>Socket</span>
+                                <strong id="socketState">idle</strong>
+                            </div>
+                            <div class="metric">
+                                <span>Audio</span>
+                                <strong id="audioState">idle</strong>
+                            </div>
+                            <div class="metric">
+                                <span>Rate</span>
+                                <strong id="rate">--</strong>
+                            </div>
+                            <div class="metric">
+                                <span>Frames</span>
+                                <strong id="frames">0</strong>
+                            </div>
+                        </div>
+
+                        <section class="signal-panel">
+                            <div class="label signal-heading">
+                                <span>Signal</span>
+                                <span id="signalState">quiet</span>
+                            </div>
+                            <div class="signal-meter-row">
+                                <div class="meter"><div id="level"></div></div>
+                                <strong id="signalValue">0%</strong>
+                            </div>
+                            <div class="signal-scope" aria-hidden="true">
+                                <svg
+                                    class="scope-wave"
+                                    viewBox="0 0 240 96"
+                                    preserveAspectRatio="none"
+                                >
+                                    <defs>
+                                        <linearGradient
+                                            id="scopeWaveGradient"
+                                            x1="0"
+                                            x2="1"
+                                            y1="0"
+                                            y2="0"
+                                        >
+                                            <stop
+                                                offset="0%"
+                                                stop-color="#d7ff5f"
+                                            />
+                                            <stop
+                                                offset="55%"
+                                                stop-color="#a7f6b2"
+                                            />
+                                            <stop
+                                                offset="100%"
+                                                stop-color="#7bdff2"
+                                            />
+                                        </linearGradient>
+                                        <filter
+                                            id="scopeGlow"
+                                            x="-20%"
+                                            y="-80%"
+                                            width="140%"
+                                            height="260%"
+                                        >
+                                            <feGaussianBlur
+                                                stdDeviation="1.0"
+                                                result="blur"
+                                            />
+                                            <feMerge>
+                                                <feMergeNode in="blur" />
+                                                <feMergeNode
+                                                    in="SourceGraphic"
+                                                />
+                                            </feMerge>
+                                        </filter>
+                                    </defs>
+                                    <polyline
+                                        id="signalWaveGlow"
+                                        class="signal-wave signal-wave-glow"
+                                    ></polyline>
+                                    <polyline
+                                        id="signalWaveTrail"
+                                        class="signal-wave signal-wave-trail"
+                                    ></polyline>
+                                    <polyline
+                                        id="signalWavePrimary"
+                                        class="signal-wave signal-wave-primary"
+                                    ></polyline>
+                                </svg>
+                            </div>
+                        </section>
+
+                        <section class="events">
+                            <div class="label">Events</div>
+                            <div id="events"></div>
+                        </section>
+
+                        <div class="buttons">
+                            <button id="start">Start</button>
+                            <button id="stop" class="secondary" disabled>
+                                Stop
+                            </button>
+                            <button id="clear" class="icon" title="Clear">
+                                ×
+                            </button>
+                        </div>
+                    </section>
+                </aside>
+
+                <section class="panel readout">
+                    <div class="label label-row">
+                        <span>Transcript</span>
+                        <span class="live-dot" aria-hidden="true"></span>
+                    </div>
+                    <div
+                        id="partial"
+                        class="empty"
+                        data-placeholder="Listening transcript appears here"
+                    ></div>
+                    <div class="final-wrap">
+                        <div class="final-label">Final</div>
+                        <div
+                            id="final"
+                            class="empty"
+                            data-placeholder="Completed transcript appears here"
+                        ></div>
+                    </div>
+                </section>
             </div>
+        </main>
 
-            <div class="status-grid">
-              <div class="metric">
-                <span>Socket</span>
-                <strong id="socketState">idle</strong>
-              </div>
-              <div class="metric">
-                <span>Audio</span>
-                <strong id="audioState">idle</strong>
-              </div>
-              <div class="metric">
-                <span>Rate</span>
-                <strong id="rate">--</strong>
-              </div>
-              <div class="metric">
-                <span>Frames</span>
-                <strong id="frames">0</strong>
-              </div>
-            </div>
-
-            <section class="signal-panel">
-              <div class="label signal-heading">
-                <span>Signal</span>
-                <span id="signalState">quiet</span>
-              </div>
-              <div class="signal-meter-row">
-                <div class="meter"><div id="level"></div></div>
-                <strong id="signalValue">0%</strong>
-              </div>
-              <div class="signal-scope" aria-hidden="true">
-                <svg class="scope-wave" viewBox="0 0 240 96" preserveAspectRatio="none">
-                  <defs>
-                    <linearGradient id="scopeWaveGradient" x1="0" x2="1" y1="0" y2="0">
-                      <stop offset="0%" stop-color="#d7ff5f" />
-                      <stop offset="55%" stop-color="#a7f6b2" />
-                      <stop offset="100%" stop-color="#7bdff2" />
-                    </linearGradient>
-                    <filter id="scopeGlow" x="-20%" y="-80%" width="140%" height="260%">
-                      <feGaussianBlur stdDeviation="1.0" result="blur" />
-                      <feMerge>
-                        <feMergeNode in="blur" />
-                        <feMergeNode in="SourceGraphic" />
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  <polyline id="signalWaveGlow" class="signal-wave signal-wave-glow"></polyline>
-                  <polyline id="signalWaveTrail" class="signal-wave signal-wave-trail"></polyline>
-                  <polyline id="signalWavePrimary" class="signal-wave signal-wave-primary"></polyline>
-                </svg>
-              </div>
-            </section>
-
-            <section class="events">
-              <div class="label">Events</div>
-              <div id="events"></div>
-            </section>
-
-            <div class="buttons">
-              <button id="start">Start</button>
-              <button id="stop" class="secondary" disabled>Stop</button>
-              <button id="clear" class="icon" title="Clear">×</button>
-            </div>
-          </section>
-        </aside>
-
-        <section class="panel readout">
-          <div class="label label-row">
-            <span>Transcript</span>
-            <span class="live-dot" aria-hidden="true"></span>
-          </div>
-          <div
-            id="partial"
-            class="empty"
-            data-placeholder="Listening transcript appears here"
-          ></div>
-          <div class="final-wrap">
-            <div class="final-label">Final</div>
-            <div
-              id="final"
-              class="empty"
-              data-placeholder="Completed transcript appears here"
-            ></div>
-          </div>
-        </section>
-      </div>
-    </main>
-
-    <script src="/app.js" defer></script>
-  </body>
+        <script src="/app.js" defer></script>
+    </body>
 </html>

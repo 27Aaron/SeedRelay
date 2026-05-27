@@ -1,15 +1,21 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
+use seedrelay::config::DEFAULT_MODEL;
 use seedrelay::realtime::{
-    decode_client_event, transcript_completed_event, transcript_delta_event,
-    validate_realtime_target, ClientEvent, SUPPORTED_MODEL,
+    decode_client_event, session_updated_event, transcript_completed_event, transcript_delta_event,
+    validate_realtime_target, ClientEvent,
 };
 
 #[test]
-fn accepts_only_seed_asr_realtime_target() {
-    validate_realtime_target("/v1/realtime?model=seed-asr-2.0").expect("seed target");
+fn accepts_only_configured_realtime_model_target() {
+    validate_realtime_target("/v1/realtime?model=seed-asr", DEFAULT_MODEL).expect("seed target");
+    validate_realtime_target("/v1/realtime?model=custom-asr", "custom-asr").expect("custom target");
+    validate_realtime_target("/v1/realtime?model=custom%2Fasr", "custom/asr")
+        .expect("encoded target");
 
-    assert!(validate_realtime_target("/v1/realtime?model=other-model").is_err());
-    assert!(validate_realtime_target("/v1/audio/transcriptions?model=seed-asr-2.0").is_err());
+    assert!(validate_realtime_target("/v1/realtime?model=other-model", DEFAULT_MODEL).is_err());
+    assert!(
+        validate_realtime_target("/v1/audio/transcriptions?model=seed-asr", DEFAULT_MODEL).is_err()
+    );
 }
 
 #[test]
@@ -25,9 +31,15 @@ fn decodes_append_event_audio_payload() {
 
 #[test]
 fn renders_openai_style_transcript_events() {
+    let session = session_updated_event("custom-asr");
     let delta = transcript_delta_event("item-1", "你好");
     let completed = transcript_completed_event("item-1", "你好，世界");
 
+    assert_eq!(session["session"]["model"], "custom-asr");
+    assert_eq!(
+        session["session"]["audio"]["input"]["transcription"]["model"],
+        "custom-asr"
+    );
     assert_eq!(
         delta["type"],
         "conversation.item.input_audio_transcription.delta"
@@ -44,6 +56,6 @@ fn renders_openai_style_transcript_events() {
 }
 
 #[test]
-fn exposes_seed_asr_as_the_only_supported_model() {
-    assert_eq!(SUPPORTED_MODEL, "seed-asr-2.0");
+fn defaults_public_model_to_seed_asr() {
+    assert_eq!(DEFAULT_MODEL, "seed-asr");
 }

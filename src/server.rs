@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,21 +16,48 @@ use uuid::Uuid;
 
 use crate::audio::LinearPcmResampler;
 use crate::client::transcribe_pcm_channel;
+use crate::config::ServerConfig;
 use crate::credentials::{ensure_credentials, CachedCredentials, USER_AGENT};
+use crate::realtime::query_param;
 use crate::realtime::{
     decode_client_event, error_event, input_audio_committed_event, session_updated_event,
     transcript_completed_event, transcript_delta_event, validate_realtime_target, ClientEvent,
-    SUPPORTED_MODEL,
 };
 use crate::response::AsrEvent;
-use crate::web::http_response;
+use crate::web::{http_response_with_config, WebRuntimeConfig};
+
+#[derive(Debug, Clone)]
+struct RuntimeConfig {
+    model: String,
+    api_key: Option<String>,
+}
+
+impl From<ServerConfig> for RuntimeConfig {
+    fn from(config: ServerConfig) -> Self {
+        Self {
+            model: config.model,
+            api_key: config.api_key,
+        }
+    }
+}
+
+impl RuntimeConfig {
+    fn web_config(&self) -> WebRuntimeConfig {
+        WebRuntimeConfig {
+            model: self.model.clone(),
+            api_key: self.api_key.clone(),
+        }
+    }
+}
 
 pub async fn serve_realtime(
-    bind: SocketAddr,
+    config: ServerConfig,
     env_path: PathBuf,
     reset_credentials: bool,
     web_enabled: bool,
 ) -> Result<()> {
+    let bind = config.bind;
+    let runtime_config = Arc::new(RuntimeConfig::from(config));
     let http = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
     let credentials = ensure_credentials(&http, &env_path, reset_credentials).await?;
     let credentials = Arc::new(credentials);
@@ -39,7 +65,10 @@ pub async fn serve_realtime(
         .await
         .with_context(|| format!("failed to bind {bind}"))?;
 
-    eprintln!("listening on ws://{bind}/v1/realtime?model={SUPPORTED_MODEL}");
+    eprintln!(
+        "listening on ws://{bind}/v1/realtime?model={}",
+        runtime_config.model
+    );
     if web_enabled {
         eprintln!("test page available at http://{bind}/");
     }
@@ -47,8 +76,11 @@ pub async fn serve_realtime(
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let credentials = Arc::clone(&credentials);
+        let runtime_config = Arc::clone(&runtime_config);
         tokio::spawn(async move {
-            if let Err(error) = handle_connection(stream, credentials, web_enabled).await {
+            if let Err(error) =
+                handle_connection(stream, credentials, runtime_config, web_enabled).await
+            {
                 eprintln!("realtime connection {peer_addr} closed: {error:#}");
             }
         });
@@ -58,30 +90,49 @@ pub async fn serve_realtime(
 async fn handle_connection(
     stream: TcpStream,
     credentials: Arc<CachedCredentials>,
+    runtime_config: Arc<RuntimeConfig>,
     web_enabled: bool,
 ) -> Result<()> {
     if web_enabled && !is_websocket_upgrade(&stream).await? {
-        return serve_http_connection(stream).await;
+        return serve_http_connection(stream, runtime_config.as_ref()).await;
     }
 
-    let ws = accept_hdr_async(stream, validate_realtime_request)
+    let handshake_config = Arc::clone(&runtime_config);
+    let callback = move |request: &Request,
+                         response: Response|
+          -> std::result::Result<Response, ErrorResponse> {
+        validate_realtime_request(request, response, handshake_config.as_ref())
+    };
+    let ws = accept_hdr_async(stream, callback)
         .await
         .context("websocket handshake failed")?;
 
-    handle_realtime_socket(ws, credentials.as_ref().clone()).await
+    handle_realtime_socket(
+        ws,
+        credentials.as_ref().clone(),
+        runtime_config.model.clone(),
+    )
+    .await
 }
 
 #[allow(clippy::result_large_err)]
 fn validate_realtime_request(
     request: &Request,
     response: Response,
+    runtime_config: &RuntimeConfig,
 ) -> std::result::Result<Response, ErrorResponse> {
     let target = request
         .uri()
         .path_and_query()
         .map(|value| value.as_str())
         .unwrap_or("");
-    validate_realtime_target(target).map_err(bad_request_response)?;
+    validate_realtime_target(target, &runtime_config.model).map_err(bad_request_response)?;
+    let authorization = request
+        .headers()
+        .get("authorization")
+        .and_then(|value| value.to_str().ok());
+    validate_api_key(authorization, target, runtime_config.api_key.as_deref())
+        .map_err(unauthorized_response)?;
     Ok(response)
 }
 
@@ -92,7 +143,10 @@ async fn is_websocket_upgrade(stream: &TcpStream) -> Result<bool> {
     Ok(header.contains("\r\nupgrade: websocket") || header.contains("\nupgrade: websocket"))
 }
 
-async fn serve_http_connection(mut stream: TcpStream) -> Result<()> {
+async fn serve_http_connection(
+    mut stream: TcpStream,
+    runtime_config: &RuntimeConfig,
+) -> Result<()> {
     let request = read_http_header(&mut stream).await?;
     let first_line = request
         .lines()
@@ -101,10 +155,11 @@ async fn serve_http_connection(mut stream: TcpStream) -> Result<()> {
     let mut parts = first_line.split_whitespace();
     let method = parts.next().unwrap_or("");
     let target = parts.next().unwrap_or("/");
-    let response = http_response(method, target).unwrap_or_else(|| {
-        "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-            .to_string()
-    });
+    let response = http_response_with_config(method, target, &runtime_config.web_config())
+        .unwrap_or_else(|| {
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+                .to_string()
+        });
     stream.write_all(response.as_bytes()).await?;
     stream.shutdown().await?;
     Ok(())
@@ -134,6 +189,7 @@ async fn read_http_header(stream: &mut TcpStream) -> Result<String> {
 async fn handle_realtime_socket(
     ws: WebSocketStream<TcpStream>,
     credentials: CachedCredentials,
+    model: String,
 ) -> Result<()> {
     let (mut write, mut read) = ws.split();
     let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(256);
@@ -148,7 +204,7 @@ async fn handle_realtime_socket(
         tokio::spawn(async move { transcribe_pcm_channel(&credentials, pcm_rx, asr_tx).await });
     tokio::pin!(asr_task);
 
-    send_json(&mut write, session_updated_event()).await?;
+    send_json(&mut write, session_updated_event(&model)).await?;
 
     loop {
         tokio::select! {
@@ -163,6 +219,7 @@ async fn handle_realtime_socket(
                             &mut write,
                             &raw,
                             &item_id,
+                            &model,
                             &mut converter,
                             &mut pcm_tx,
                         ).await {
@@ -228,6 +285,7 @@ async fn handle_client_event(
     write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     raw: &str,
     item_id: &str,
+    model: &str,
     converter: &mut Pcm16Converter,
     pcm_tx: &mut Option<mpsc::Sender<Vec<u8>>>,
 ) -> Result<()> {
@@ -236,7 +294,7 @@ async fn handle_client_event(
             if let Some(rate) = input_sample_rate {
                 *converter = Pcm16Converter::new(rate);
             }
-            send_json(write, session_updated_event()).await?;
+            send_json(write, session_updated_event(model)).await?;
         }
         ClientEvent::AppendAudio(audio) => {
             let Some(tx) = pcm_tx else {
@@ -294,10 +352,42 @@ fn append_final_transcript(transcript: &mut String, text: &str) -> Option<String
 }
 
 fn bad_request_response(error: anyhow::Error) -> ErrorResponse {
+    error_response(StatusCode::BAD_REQUEST, error)
+}
+
+fn unauthorized_response(error: anyhow::Error) -> ErrorResponse {
+    error_response(StatusCode::UNAUTHORIZED, error)
+}
+
+fn error_response(status: StatusCode, error: anyhow::Error) -> ErrorResponse {
     Response::builder()
-        .status(StatusCode::BAD_REQUEST)
+        .status(status)
         .body(Some(error.to_string()))
-        .expect("valid bad request response")
+        .expect("valid error response")
+}
+
+fn validate_api_key(
+    authorization: Option<&str>,
+    target: &str,
+    expected_api_key: Option<&str>,
+) -> Result<()> {
+    let Some(expected_api_key) = expected_api_key else {
+        return Ok(());
+    };
+
+    let bearer_matches = authorization
+        .and_then(|value| value.trim().split_once(' '))
+        .map(|(scheme, token)| {
+            scheme.eq_ignore_ascii_case("bearer") && token.trim() == expected_api_key
+        })
+        .unwrap_or(false);
+    let query_matches = query_param(target, "api_key").as_deref() == Some(expected_api_key);
+
+    if bearer_matches || query_matches {
+        Ok(())
+    } else {
+        Err(anyhow!("missing or invalid API key"))
+    }
 }
 
 struct Pcm16Converter {
@@ -333,7 +423,7 @@ fn even_pcm_bytes(pcm16: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_final_transcript, interim_delta};
+    use super::{append_final_transcript, interim_delta, validate_api_key};
 
     #[test]
     fn interim_delta_sends_only_new_suffix_for_growing_snapshots() {
@@ -366,5 +456,39 @@ mod tests {
             Some("你好啊，hello。".to_string())
         );
         assert_eq!(transcript, "你好啊，hello。");
+    }
+
+    #[test]
+    fn api_key_is_optional_when_not_configured() {
+        validate_api_key(None, "/v1/realtime?model=seed-asr", None).expect("no api key");
+    }
+
+    #[test]
+    fn api_key_accepts_bearer_authorization_or_query_param() {
+        validate_api_key(
+            Some("Bearer local-secret"),
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret"),
+        )
+        .expect("bearer key");
+        validate_api_key(
+            None,
+            "/v1/realtime?model=seed-asr&api_key=local-secret",
+            Some("local-secret"),
+        )
+        .expect("query key");
+    }
+
+    #[test]
+    fn api_key_rejects_missing_or_invalid_key_when_configured() {
+        assert!(
+            validate_api_key(None, "/v1/realtime?model=seed-asr", Some("local-secret")).is_err()
+        );
+        assert!(validate_api_key(
+            Some("Bearer wrong"),
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret"),
+        )
+        .is_err());
     }
 }

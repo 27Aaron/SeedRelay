@@ -1,8 +1,35 @@
+use serde_json::json;
+
+use crate::config::DEFAULT_MODEL;
+
 pub const INDEX_HTML: &str = include_str!("../web/index.html");
 pub const STYLES_CSS: &str = include_str!("../web/styles.css");
 pub const APP_JS: &str = include_str!("../web/app.js");
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct WebRuntimeConfig {
+    pub model: String,
+    pub api_key: Option<String>,
+}
+
+impl Default for WebRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            model: DEFAULT_MODEL.into(),
+            api_key: None,
+        }
+    }
+}
+
 pub fn http_response(method: &str, target: &str) -> Option<String> {
+    http_response_with_config(method, target, &WebRuntimeConfig::default())
+}
+
+pub fn http_response_with_config(
+    method: &str,
+    target: &str,
+    config: &WebRuntimeConfig,
+) -> Option<String> {
     let path = target.split('?').next().unwrap_or(target);
     match (method, path) {
         ("GET", "/") | ("GET", "/index.html") => Some(response(
@@ -23,6 +50,15 @@ pub fn http_response(method: &str, target: &str) -> Option<String> {
             APP_JS,
             false,
         )),
+        ("GET", "/config.json") => {
+            let body = config_json(config);
+            Some(response(
+                "200 OK",
+                "application/json; charset=utf-8",
+                &body,
+                false,
+            ))
+        }
         ("HEAD", "/") | ("HEAD", "/index.html") => Some(response(
             "200 OK",
             "text/html; charset=utf-8",
@@ -41,6 +77,15 @@ pub fn http_response(method: &str, target: &str) -> Option<String> {
             APP_JS,
             true,
         )),
+        ("HEAD", "/config.json") => {
+            let body = config_json(config);
+            Some(response(
+                "200 OK",
+                "application/json; charset=utf-8",
+                &body,
+                true,
+            ))
+        }
         ("GET", "/health") => Some(response(
             "200 OK",
             "application/json; charset=utf-8",
@@ -54,6 +99,14 @@ pub fn http_response(method: &str, target: &str) -> Option<String> {
             false,
         )),
     }
+}
+
+fn config_json(config: &WebRuntimeConfig) -> String {
+    json!({
+        "model": config.model,
+        "apiKey": config.api_key,
+    })
+    .to_string()
 }
 
 fn response(status: &str, content_type: &str, body: &str, head_only: bool) -> String {

@@ -6,6 +6,7 @@ const els = {
   audioState: document.querySelector("#audioState"),
   rate: document.querySelector("#rate"),
   frames: document.querySelector("#frames"),
+  modelName: document.querySelector("#modelName"),
   signalPanel: document.querySelector(".signal-panel"),
   signalState: document.querySelector("#signalState"),
   signalValue: document.querySelector("#signalValue"),
@@ -37,6 +38,12 @@ const MAX_TRANSCRIPT_LINE = 12;
 const MAX_EVENT_LINES = 5;
 const SIGNAL_EASING = 0.18;
 const SIGNAL_IDLE_THRESHOLD = 0.08;
+const DEFAULT_RUNTIME_CONFIG = {
+  model: "seed-asr",
+  apiKey: null,
+};
+let runtimeConfig = { ...DEFAULT_RUNTIME_CONFIG };
+let configReady = Promise.resolve();
 
 const workletSource = `
   class CaptureProcessor extends AudioWorkletProcessor {
@@ -51,9 +58,45 @@ const workletSource = `
   registerProcessor("capture-processor", CaptureProcessor);
 `;
 
+function normalizeRuntimeConfig(config) {
+  const model =
+    typeof config?.model === "string" && config.model.trim()
+      ? config.model.trim()
+      : DEFAULT_RUNTIME_CONFIG.model;
+  const apiKey =
+    typeof config?.apiKey === "string" && config.apiKey.trim()
+      ? config.apiKey.trim()
+      : null;
+  return { model, apiKey };
+}
+
+async function loadRuntimeConfig() {
+  try {
+    const response = await fetch("/config.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(`config ${response.status}`);
+    runtimeConfig = normalizeRuntimeConfig(await response.json());
+  } catch (error) {
+    runtimeConfig = { ...DEFAULT_RUNTIME_CONFIG };
+    log(error.message || String(error), "config");
+  }
+  els.modelName.textContent = runtimeConfig.model;
+}
+
 function realtimeUrl() {
-  const url = new URL("/v1/realtime?model=seed-asr-2.0", window.location.href);
+  const url = new URL("/v1/realtime", window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("model", runtimeConfig.model);
+  if (runtimeConfig.apiKey) {
+    url.searchParams.set("api_key", runtimeConfig.apiKey);
+  }
+  return url.toString();
+}
+
+function displayRealtimeUrl() {
+  const url = new URL(realtimeUrl());
+  if (url.searchParams.has("api_key")) {
+    url.searchParams.set("api_key", "***");
+  }
   return url.toString();
 }
 
@@ -62,7 +105,9 @@ function log(line, kind = "") {
   const prefix = kind ? `[${kind}]` : "";
   const nextLine = `${time} ${prefix} ${line}`;
   const lines = els.events.textContent.split("\n").filter(Boolean);
-  els.events.textContent = [nextLine, ...lines].slice(0, MAX_EVENT_LINES).join("\n");
+  els.events.textContent = [nextLine, ...lines]
+    .slice(0, MAX_EVENT_LINES)
+    .join("\n");
 }
 
 function setSocket(state, ok = false) {
@@ -96,7 +141,10 @@ function buildWavePoints(level, phase, offset = 0) {
     const carrier = Math.sin(t * Math.PI * 6 + phase + offset);
     const detail = Math.sin(t * Math.PI * 17 + phase * 0.74 + offset) * 0.24;
     const shimmer = Math.sin(t * Math.PI * 31 - phase * 0.36) * 0.08;
-    const y = Math.max(4, Math.min(92, center + (carrier + detail + shimmer) * amplitude));
+    const y = Math.max(
+      4,
+      Math.min(92, center + (carrier + detail + shimmer) * amplitude),
+    );
     points.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
   return points.join(" ");
@@ -114,16 +162,23 @@ function drawSignalFrame(now) {
   signalAnimationFrame = null;
   const frameMs = Math.min(34, Math.max(0, now - lastSignalFrameAt || 16));
   lastSignalFrameAt = now;
-  signalDisplayLevel += (signalTargetLevel - signalDisplayLevel) * SIGNAL_EASING;
+  signalDisplayLevel +=
+    (signalTargetLevel - signalDisplayLevel) * SIGNAL_EASING;
   if (signalTargetLevel === 0 && signalDisplayLevel < SIGNAL_IDLE_THRESHOLD) {
     signalDisplayLevel = 0;
   }
   els.level.style.width = `${signalDisplayLevel}%`;
   els.signalPanel.style.setProperty("--signal-level", `${signalDisplayLevel}%`);
   els.signalValue.textContent = `${Math.round(signalDisplayLevel)}%`;
-  signalPhase = (signalPhase + frameMs * (0.0008 + signalDisplayLevel / 52000)) % (Math.PI * 2);
+  signalPhase =
+    (signalPhase + frameMs * (0.0008 + signalDisplayLevel / 52000)) %
+    (Math.PI * 2);
   renderSignalWave(signalDisplayLevel);
-  if (isRecording || signalTargetLevel > SIGNAL_IDLE_THRESHOLD || signalDisplayLevel > SIGNAL_IDLE_THRESHOLD) {
+  if (
+    isRecording ||
+    signalTargetLevel > SIGNAL_IDLE_THRESHOLD ||
+    signalDisplayLevel > SIGNAL_IDLE_THRESHOLD
+  ) {
     signalAnimationFrame = requestAnimationFrame(drawSignalFrame);
   }
 }
@@ -136,7 +191,8 @@ function requestSignalFrame() {
 
 function setSignal(peak) {
   const level = signalLevelFromPeak(peak);
-  signalTargetLevel = peak === 0 ? 0 : Math.max(signalTargetLevel * 0.86, level);
+  signalTargetLevel =
+    peak === 0 ? 0 : Math.max(signalTargetLevel * 0.86, level);
   const nextState = signalStateForPeak(peak);
   if (signalLastState !== nextState) {
     signalLastState = nextState;
@@ -195,7 +251,9 @@ function splitTranscript(text) {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (!normalized) return [];
 
-  const phrases = normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [normalized];
+  const phrases = normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [
+    normalized,
+  ];
   const lines = [];
   for (const phrase of phrases) {
     let rest = phrase.trim();
@@ -217,7 +275,9 @@ function renderTranscript(text) {
   els.partial.replaceChildren();
   els.partial.classList.toggle("empty", lines.length === 0);
   for (const [index, line] of lines.entries()) {
-    els.partial.append(createTranscriptLine(line, index, index === lines.length - 1));
+    els.partial.append(
+      createTranscriptLine(line, index, index === lines.length - 1),
+    );
   }
   els.partial.scrollTop = els.partial.scrollHeight;
 }
@@ -232,6 +292,7 @@ function resetTranscript() {
 }
 
 async function start() {
+  await configReady;
   els.start.disabled = true;
   els.stop.disabled = false;
   frameCount = 0;
@@ -250,7 +311,7 @@ async function start() {
     audioContext = new AudioContext();
     els.rate.textContent = `${audioContext.sampleRate} Hz`;
     const moduleUrl = URL.createObjectURL(
-      new Blob([workletSource], { type: "application/javascript" })
+      new Blob([workletSource], { type: "application/javascript" }),
     );
     await audioContext.audioWorklet.addModule(moduleUrl);
     URL.revokeObjectURL(moduleUrl);
@@ -299,7 +360,9 @@ async function start() {
       const event = JSON.parse(message.data);
       if (event.type === "conversation.item.input_audio_transcription.delta") {
         appendTranscriptDelta(event.delta || "");
-      } else if (event.type === "conversation.item.input_audio_transcription.completed") {
+      } else if (
+        event.type === "conversation.item.input_audio_transcription.completed"
+      ) {
         renderTranscript(event.transcript || transcriptText);
         setText(els.final, event.transcript || transcriptText);
         if (!isRecording) setSocket("completed", true);
@@ -367,4 +430,6 @@ els.clear.addEventListener("click", () => {
 setSocket("idle");
 setAudio("idle");
 setSignal(0);
-log(realtimeUrl());
+configReady = loadRuntimeConfig().finally(() => {
+  log(displayRealtimeUrl());
+});

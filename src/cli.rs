@@ -15,6 +15,12 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub env_path: Option<PathBuf>,
 
+    #[arg(long, value_name = "MODEL")]
+    pub model: Option<String>,
+
+    #[arg(long, value_name = "KEY")]
+    pub api_key: Option<String>,
+
     #[arg(long)]
     pub reset_credentials: bool,
 
