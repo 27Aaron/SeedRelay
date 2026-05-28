@@ -15,7 +15,7 @@ SeedRelay is a lightweight local server that exposes an OpenAI Realtime API endp
 - **Streaming Transcription** — Real-time interim results and final transcripts
 - **Audio Processing** — Automatic sample rate conversion and Opus encoding
 - **Built-in Web UI** — Live testing interface with audio visualization (`--webui`)
-- **API Key Auth** — Optional Bearer token, `api_key` query string, or WebSocket subprotocol enforcement
+- **API Key Auth** — Optional Bearer token or official WebSocket subprotocol enforcement
 - **Zero-config Credentials** — Automatic device registration and token management
 
 ## Architecture
@@ -92,7 +92,7 @@ Customize via `command:` in `compose.yaml`.
 ### WebSocket Endpoint
 
 ```
-ws://127.0.0.1:8000/v1/realtime?model=seed-asr[&api_key=...]
+ws://127.0.0.1:8000/v1/realtime?model=seed-asr
 ```
 
 ### OpenAI Compatibility Scope
@@ -102,7 +102,7 @@ SeedRelay implements the OpenAI Realtime transcription surface for live speech-t
 - `GET /v1/models`
 - `GET /v1/models/{model}`
 - `WS /v1/realtime?model=seed-asr`
-- `Authorization: Bearer <api-key>`, `api_key` query string, and `openai-insecure-api-key.<api-key>` WebSocket subprotocol auth
+- `Authorization: Bearer <api-key>` and `openai-insecure-api-key.<api-key>` WebSocket subprotocol auth
 - `session.update`
 - `input_audio_buffer.append`
 - `input_audio_buffer.commit`

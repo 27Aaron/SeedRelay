@@ -19,7 +19,6 @@ use crate::audio::LinearPcmResampler;
 use crate::client::transcribe_pcm_channel;
 use crate::config::ServerConfig;
 use crate::credentials::{ensure_credentials, CachedCredentials, USER_AGENT};
-use crate::realtime::query_param;
 use crate::realtime::{
     decode_client_event, error_event, input_audio_cleared_event, input_audio_committed_event,
     session_created_event, session_updated_event, transcript_completed_event,
@@ -289,13 +288,8 @@ fn validate_realtime_request(
         .headers()
         .get("sec-websocket-protocol")
         .and_then(|value| value.to_str().ok());
-    validate_api_key(
-        authorization,
-        protocols,
-        target,
-        runtime_config.api_key.as_deref(),
-    )
-    .map_err(unauthorized_response)?;
+    validate_api_key(authorization, protocols, runtime_config.api_key.as_deref())
+        .map_err(unauthorized_response)?;
     if let Some(expected_api_key) = runtime_config.api_key.as_deref() {
         if let Some(protocol) = matching_realtime_subprotocol(protocols, expected_api_key) {
             let mut response = response;
@@ -647,7 +641,6 @@ fn error_response(status: StatusCode, error: anyhow::Error) -> ErrorResponse {
 fn validate_api_key(
     authorization: Option<&str>,
     protocols: Option<&str>,
-    target: &str,
     expected_api_key: Option<&str>,
 ) -> Result<()> {
     let Some(expected_api_key) = expected_api_key else {
@@ -660,10 +653,9 @@ fn validate_api_key(
             scheme.eq_ignore_ascii_case("bearer") && token.trim() == expected_api_key
         })
         .is_some();
-    let query_matches = query_param(target, "api_key").as_deref() == Some(expected_api_key);
     let protocol_matches = matching_realtime_subprotocol(protocols, expected_api_key).is_some();
 
-    if bearer_matches || query_matches || protocol_matches {
+    if bearer_matches || protocol_matches {
         return Ok(());
     }
 
@@ -687,26 +679,6 @@ fn matching_realtime_subprotocol<'a>(
             .strip_prefix("openai-insecure-api-key.")
             .is_some_and(|key| !key.is_empty() && key == expected_api_key)
     })
-}
-
-#[cfg(test)]
-fn redact_api_key(target: &str) -> String {
-    let Some((path, query)) = target.split_once('?') else {
-        return target.to_string();
-    };
-    let query = query
-        .split('&')
-        .map(|pair| {
-            let (key, _) = pair.split_once('=').unwrap_or((pair, ""));
-            if key == "api_key" {
-                "api_key=***".to_string()
-            } else {
-                pair.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("&");
-    format!("{path}?{query}")
 }
 
 fn encode_query_component(value: &str) -> String {
@@ -765,7 +737,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message;
 
     use super::{
-        client_action_for_event, decode_socket_message, encode_query_component, redact_api_key,
+        client_action_for_event, decode_socket_message, encode_query_component,
         reset_audio_buffer_converter, selected_realtime_subprotocol, validate_api_key,
         validate_realtime_request, ActiveTurn, ClientAction, Pcm16Converter, RuntimeConfig,
         SocketMessage, TurnInput, TurnTranscriptState,
@@ -935,32 +907,20 @@ mod tests {
 
     #[test]
     fn api_key_is_optional_when_not_configured() {
-        validate_api_key(None, None, "/v1/realtime?model=seed-asr", None).expect("no api key");
+        validate_api_key(None, None, None).expect("no api key");
     }
 
     #[test]
-    fn api_key_accepts_bearer_authorization_or_query_param() {
-        validate_api_key(
-            Some("Bearer local-secret"),
-            None,
-            "/v1/realtime?model=seed-asr",
-            Some("local-secret"),
-        )
-        .expect("bearer key");
-        validate_api_key(
-            Some("Bearer  local-secret "),
-            None,
-            "/v1/realtime?model=seed-asr",
-            Some("local-secret"),
-        )
-        .expect("bearer key with token whitespace");
-        validate_api_key(
-            None,
-            None,
-            "/v1/realtime?model=seed-asr&api_key=local-secret",
-            Some("local-secret"),
-        )
-        .expect("query key");
+    fn api_key_accepts_bearer_authorization() {
+        validate_api_key(Some("Bearer local-secret"), None, Some("local-secret"))
+            .expect("bearer key");
+        validate_api_key(Some("Bearer  local-secret "), None, Some("local-secret"))
+            .expect("bearer key with token whitespace");
+    }
+
+    #[test]
+    fn api_key_query_parameter_is_not_supported() {
+        assert!(validate_api_key(None, None, Some("local-secret"),).is_err());
     }
 
     #[test]
@@ -968,7 +928,6 @@ mod tests {
         validate_api_key(
             None,
             Some("realtime, openai-insecure-api-key.local-secret, other"),
-            "/v1/realtime?model=seed-asr",
             Some("local-secret"),
         )
         .expect("subprotocol api key");
@@ -979,7 +938,6 @@ mod tests {
         validate_api_key(
             None,
             Some("openai-insecure-api-key.bad, openai-insecure-api-key.local-secret"),
-            "/v1/realtime?model=seed-asr",
             Some("local-secret"),
         )
         .expect("later subprotocol api key");
@@ -990,7 +948,6 @@ mod tests {
         assert!(validate_api_key(
             None,
             Some("openai-insecure-api-key.wrong-secret"),
-            "/v1/realtime?model=seed-asr",
             Some("local-secret"),
         )
         .is_err());
@@ -1107,20 +1064,8 @@ mod tests {
 
     #[test]
     fn api_key_rejects_missing_or_invalid_key_when_configured() {
-        assert!(validate_api_key(
-            None,
-            None,
-            "/v1/realtime?model=seed-asr",
-            Some("local-secret")
-        )
-        .is_err());
-        assert!(validate_api_key(
-            Some("Bearer wrong"),
-            None,
-            "/v1/realtime?model=seed-asr",
-            Some("local-secret"),
-        )
-        .is_err());
+        assert!(validate_api_key(None, None, Some("local-secret")).is_err());
+        assert!(validate_api_key(Some("Bearer wrong"), None, Some("local-secret")).is_err());
     }
 
     #[test]
@@ -1159,18 +1104,6 @@ mod tests {
         assert!(lines.contains(&"  Auth      disabled".to_string()));
         assert!(lines.contains(&"  Web UI    disabled".to_string()));
         assert!(!lines.iter().any(|line| line.contains("Debug")));
-    }
-
-    #[test]
-    fn redacts_api_key_from_logged_targets() {
-        assert_eq!(
-            redact_api_key("/v1/realtime?model=seed-asr&api_key=local-secret"),
-            "/v1/realtime?model=seed-asr&api_key=***"
-        );
-        assert_eq!(
-            redact_api_key("/v1/realtime?api_key=local-secret&model=seed-asr"),
-            "/v1/realtime?api_key=***&model=seed-asr"
-        );
     }
 
     #[test]

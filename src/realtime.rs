@@ -43,11 +43,6 @@ pub fn validate_realtime_target(target: &str, model: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn query_param(target: &str, key: &str) -> Option<String> {
-    let (_, query) = target.split_once('?')?;
-    query_param_from_query(query, key)
-}
-
 pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
     let value: Value =
         serde_json::from_str(raw).map_err(|error| anyhow!("invalid JSON: {error}"))?;

@@ -86,18 +86,19 @@ function realtimeUrl() {
   const url = new URL("/v1/realtime", window.location.href);
   url.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("model", runtimeConfig.model);
-  if (runtimeConfig.apiKey) {
-    url.searchParams.set("api_key", runtimeConfig.apiKey);
-  }
   return url.toString();
 }
 
-function displayRealtimeUrl() {
-  const url = new URL(realtimeUrl());
-  if (url.searchParams.has("api_key")) {
-    url.searchParams.set("api_key", "***");
+function realtimeProtocols() {
+  const protocols = ["realtime"];
+  if (runtimeConfig.apiKey) {
+    protocols.push("openai-insecure-api-key." + runtimeConfig.apiKey);
   }
-  return url.toString();
+  return protocols;
+}
+
+function displayRealtimeUrl() {
+  return realtimeUrl();
 }
 
 function log(line, kind = "") {
@@ -316,7 +317,7 @@ async function start() {
     await audioContext.audioWorklet.addModule(moduleUrl);
     URL.revokeObjectURL(moduleUrl);
 
-    ws = new WebSocket(realtimeUrl());
+    ws = new WebSocket(realtimeUrl(), realtimeProtocols());
     setSocket("connecting");
 
     ws.addEventListener("open", () => {

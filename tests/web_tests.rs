@@ -8,8 +8,10 @@ fn index_html_loads_runtime_config_for_realtime_endpoint() {
     assert!(APP_JS.contains("fetch(\"/config.json\""));
     assert!(APP_JS.contains("model: \"seed-asr\""));
     assert!(APP_JS.contains("url.searchParams.set(\"model\", runtimeConfig.model);"));
-    assert!(APP_JS.contains("url.searchParams.set(\"api_key\", runtimeConfig.apiKey);"));
+    assert!(APP_JS.contains("\"openai-insecure-api-key.\" + runtimeConfig.apiKey"));
+    assert!(APP_JS.contains("new WebSocket(realtimeUrl(), realtimeProtocols())"));
     assert!(APP_JS.contains("displayRealtimeUrl()"));
+    assert!(!APP_JS.contains("url.searchParams.set(\"api_key\", runtimeConfig.apiKey);"));
     assert!(!APP_JS.contains("/v1/realtime?model=seed-asr-2.0"));
     assert!(APP_JS.contains("input_audio_buffer.append"));
     assert!(APP_JS.contains("conversation.item.input_audio_transcription.delta"));
