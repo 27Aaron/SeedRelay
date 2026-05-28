@@ -131,7 +131,7 @@ pub fn http_response_with_config(
 fn config_json(config: &WebRuntimeConfig) -> String {
     json!({
         "model": config.model,
-        "apiKey": config.api_key,
+        "authRequired": config.api_key.is_some(),
     })
     .to_string()
 }

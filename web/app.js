@@ -17,6 +17,7 @@ const els = {
   partial: document.querySelector("#partial"),
   final: document.querySelector("#final"),
   events: document.querySelector("#events"),
+  apiKey: document.querySelector("#apiKey"),
 };
 
 let ws = null;
@@ -39,9 +40,10 @@ const MAX_TRANSCRIPT_LINE = 12;
 const MAX_EVENT_LINES = 5;
 const SIGNAL_EASING = 0.18;
 const SIGNAL_IDLE_THRESHOLD = 0.08;
+const API_KEY_STORAGE_KEY = "seedrelay.apiKey";
 const DEFAULT_RUNTIME_CONFIG = {
   model: "seed-asr",
-  apiKey: null,
+  authRequired: false,
 };
 let runtimeConfig = { ...DEFAULT_RUNTIME_CONFIG };
 let configReady = Promise.resolve();
@@ -64,11 +66,7 @@ function normalizeRuntimeConfig(config) {
     typeof config?.model === "string" && config.model.trim()
       ? config.model.trim()
       : DEFAULT_RUNTIME_CONFIG.model;
-  const apiKey =
-    typeof config?.apiKey === "string" && config.apiKey.trim()
-      ? config.apiKey.trim()
-      : null;
-  return { model, apiKey };
+  return { model, authRequired: config?.authRequired === true };
 }
 
 async function loadRuntimeConfig() {
@@ -81,6 +79,20 @@ async function loadRuntimeConfig() {
     log(error.message || String(error), "config");
   }
   els.modelName.textContent = runtimeConfig.model;
+  els.apiKey.value = localStorage.getItem(API_KEY_STORAGE_KEY) || "";
+}
+
+function currentApiKey() {
+  return els.apiKey.value.trim();
+}
+
+function persistApiKey() {
+  const apiKey = currentApiKey();
+  if (apiKey) {
+    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+  } else {
+    localStorage.removeItem(API_KEY_STORAGE_KEY);
+  }
 }
 
 function realtimeUrl() {
@@ -92,8 +104,9 @@ function realtimeUrl() {
 
 function realtimeProtocols() {
   const protocols = ["realtime"];
-  if (runtimeConfig.apiKey) {
-    protocols.push("openai-insecure-api-key." + runtimeConfig.apiKey);
+  const apiKey = currentApiKey();
+  if (apiKey) {
+    protocols.push("openai-insecure-api-key." + apiKey);
   }
   return protocols;
 }
@@ -321,7 +334,7 @@ function renderLiveTranscript(text) {
   transcriptText = normalizeTranscript(text);
   const { committed, active } = partitionTranscript(text);
   committedTranscriptText = committed;
-  renderTranscript(active);
+  renderTranscript(transcriptText);
   renderFinalTranscript(committedTranscriptText);
 }
 
@@ -333,7 +346,7 @@ function renderFinalTranscript(text) {
 function commitFinalTranscript(text) {
   transcriptText = normalizeTranscript(text);
   committedTranscriptText = transcriptText;
-  renderTranscript("");
+  renderTranscript(transcriptText);
   renderFinalTranscript(committedTranscriptText);
 }
 
@@ -354,6 +367,15 @@ async function start() {
   setAudio("requesting");
 
   try {
+    if (runtimeConfig.authRequired && !currentApiKey()) {
+      els.start.disabled = false;
+      els.stop.disabled = true;
+      setAudio("needs key", true);
+      log("api key required", "auth");
+      return;
+    }
+    persistApiKey();
+
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,

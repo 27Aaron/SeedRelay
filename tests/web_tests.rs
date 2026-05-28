@@ -9,11 +9,17 @@ fn index_html_loads_runtime_config_for_realtime_endpoint() {
     assert!(INDEX_HTML.contains("<title>SeedRelay</title>"));
     assert!(APP_JS.contains("fetch(\"/config.json\""));
     assert!(APP_JS.contains("model: \"seed-asr\""));
+    assert!(APP_JS.contains("authRequired: false"));
+    assert!(INDEX_HTML.contains(r#"id="apiKey""#));
+    assert!(INDEX_HTML.contains(r#"type="password""#));
+    assert!(APP_JS.contains("localStorage.getItem(API_KEY_STORAGE_KEY)"));
+    assert!(APP_JS.contains("localStorage.setItem(API_KEY_STORAGE_KEY, apiKey)"));
     assert!(APP_JS.contains("url.searchParams.set(\"model\", runtimeConfig.model);"));
-    assert!(APP_JS.contains("\"openai-insecure-api-key.\" + runtimeConfig.apiKey"));
+    assert!(APP_JS.contains("\"openai-insecure-api-key.\" + apiKey"));
     assert!(APP_JS.contains("new WebSocket(realtimeUrl(), realtimeProtocols())"));
     assert!(APP_JS.contains("displayRealtimeUrl()"));
-    assert!(!APP_JS.contains("url.searchParams.set(\"api_key\", runtimeConfig.apiKey);"));
+    assert!(!APP_JS.contains("url.searchParams.set(\"api_key\""));
+    assert!(!APP_JS.contains("runtimeConfig.apiKey"));
     assert!(!APP_JS.contains("/v1/realtime?model=seed-asr-2.0"));
     assert!(APP_JS.contains("input_audio_buffer.append"));
     assert!(APP_JS.contains("conversation.item.input_audio_transcription.delta"));
@@ -103,13 +109,14 @@ fn index_html_streams_transcript_as_rows() {
     assert!(APP_JS.contains("const nextTranscript ="));
     assert!(APP_JS.contains("event.transcript || transcriptText + (event.delta || \"\")"));
     assert!(APP_JS.contains("const { committed, active } = partitionTranscript(text);"));
-    assert!(APP_JS.contains("renderTranscript(active);"));
+    assert!(APP_JS.contains("renderTranscript(transcriptText);"));
     assert!(APP_JS.contains("renderFinalTranscript(committedTranscriptText);"));
     assert!(APP_JS.contains("commitFinalTranscript(event.transcript || transcriptText);"));
     assert!(APP_JS.contains("renderLiveTranscript(nextTranscript)"));
     assert!(APP_JS.contains("if (!isRecording) setSocket(\"completed\", true);"));
     assert!(!APP_JS.contains("els.partial.textContent + (event.delta || \"\")"));
     assert!(!APP_JS.contains("appendTranscriptDelta(event.delta || \"\")"));
+    assert!(!APP_JS.contains("renderTranscript(active);"));
     assert!(!APP_JS.contains("renderFinalTranscript(transcriptText)"));
     assert!(!APP_JS.contains("              setSocket(\"completed\", true);"));
 }
@@ -281,7 +288,9 @@ fn serves_runtime_web_config() {
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.contains("content-type: application/json; charset=utf-8\r\n"));
     assert!(response.contains(r#""model":"custom-asr""#));
-    assert!(response.contains(r#""apiKey":"local-secret""#));
+    assert!(response.contains(r#""authRequired":true"#));
+    assert!(!response.contains("local-secret"));
+    assert!(!response.contains("apiKey"));
 }
 
 #[test]
@@ -289,7 +298,8 @@ fn default_runtime_web_config_has_no_api_key() {
     let response = default_web_response("GET", "/config.json").expect("config response");
 
     assert!(response.contains(r#""model":"seed-asr""#));
-    assert!(response.contains(r#""apiKey":null"#));
+    assert!(response.contains(r#""authRequired":false"#));
+    assert!(!response.contains("apiKey"));
 }
 
 #[test]

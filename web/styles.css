@@ -365,6 +365,32 @@ button:disabled {
     overflow: hidden;
 }
 
+.api-key-field {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 14px;
+    color: var(--muted);
+    font-size: var(--compact-label-size);
+    text-transform: uppercase;
+}
+
+.api-key-field input {
+    width: 100%;
+    min-height: 36px;
+    border: var(--hairline);
+    background: color-mix(in srgb, var(--field-bg) 88%, transparent);
+    color: var(--ink);
+    font: 12px/1.2 var(--mono-font);
+    letter-spacing: 0;
+    outline: none;
+    padding: 0 10px;
+}
+
+.api-key-field input:focus {
+    border-color: color-mix(in srgb, var(--accent) 72%, var(--line));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .label {
     color: var(--muted);
     font-size: 12px;
