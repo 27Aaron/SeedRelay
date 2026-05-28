@@ -358,7 +358,13 @@ async function start() {
     });
 
     ws.addEventListener("message", (message) => {
-      const event = JSON.parse(message.data);
+      let event;
+      try {
+        event = JSON.parse(message.data);
+      } catch (error) {
+        log("invalid server event", "error");
+        return;
+      }
       if (event.type === "conversation.item.input_audio_transcription.delta") {
         appendTranscriptDelta(event.delta || "");
       } else if (

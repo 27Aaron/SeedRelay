@@ -66,7 +66,7 @@ cargo build --release
 ./target/release/seedrelay --api-key your-secret-key --webui
 ```
 
-首次运行会自动注册设备并获取凭证，保存到当前工作目录下的 `.seedrelay/credentials.json`。
+首次运行会自动注册设备并获取凭证，保存到当前工作目录下的 `.seedrelay/credentials.json`。如果通过容器或服务管理器运行，请持久化这个目录。
 
 ## 命令行参数
 
@@ -85,7 +85,7 @@ cargo build --release
 docker compose up -d
 ```
 
-通过 `compose.yaml` 的 `command:` 字段自定义参数。
+通过 `compose.yml` 的 `command:` 字段自定义参数。
 
 ## API
 

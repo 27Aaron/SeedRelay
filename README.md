@@ -66,7 +66,7 @@ cargo build --release
 ./target/release/seedrelay --api-key your-secret-key --webui
 ```
 
-First run will automatically register a device and obtain credentials. These are saved to `.seedrelay/credentials.json` in the current working directory.
+First run will automatically register a device and obtain credentials. These are saved to `.seedrelay/credentials.json` in the current working directory, so keep that directory persistent if you run SeedRelay from a container or a service manager.
 
 ## CLI Reference
 
@@ -85,7 +85,7 @@ First run will automatically register a device and obtain credentials. These are
 docker compose up -d
 ```
 
-Customize via `command:` in `compose.yaml`.
+Customize via `command:` in `compose.yml`.
 
 ## API
 

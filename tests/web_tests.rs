@@ -106,6 +106,18 @@ fn index_html_streams_transcript_as_rows() {
 }
 
 #[test]
+fn app_js_handles_invalid_server_events() {
+    let message_handler = APP_JS
+        .split("ws.addEventListener(\"message\"")
+        .nth(1)
+        .expect("message handler");
+
+    assert!(message_handler.contains("try {"));
+    assert!(message_handler.contains("JSON.parse(message.data)"));
+    assert!(message_handler.contains("invalid server event"));
+}
+
+#[test]
 fn index_html_places_events_under_signal_with_buttons_at_bottom() {
     let control = INDEX_HTML
         .find(r#"<section class="panel control">"#)
