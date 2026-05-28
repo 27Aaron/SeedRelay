@@ -34,6 +34,110 @@ struct RuntimeConfig {
     api_key: Option<String>,
 }
 
+#[derive(Debug, Default)]
+struct TurnTranscriptState {
+    interim_transcript: String,
+    final_transcript: String,
+}
+
+impl TurnTranscriptState {
+    fn interim_delta(&mut self, current: &str) -> Option<String> {
+        let delta = current
+            .strip_prefix(self.interim_transcript.as_str())
+            .unwrap_or(current)
+            .to_string();
+        self.interim_transcript.clear();
+        self.interim_transcript.push_str(current);
+
+        (!delta.is_empty()).then_some(delta)
+    }
+
+    fn append_final(&mut self, text: &str) -> Option<String> {
+        if text.is_empty() {
+            return None;
+        }
+        self.final_transcript.push_str(text);
+        Some(self.final_transcript.clone())
+    }
+}
+
+#[derive(Debug)]
+struct ActiveTurn {
+    item_id: String,
+    input: TurnInput,
+    transcript: TurnTranscriptState,
+}
+
+#[derive(Debug)]
+enum TurnInput {
+    Idle,
+    Open(mpsc::Sender<Vec<u8>>),
+    Closed,
+}
+
+impl ActiveTurn {
+    fn new_idle() -> Self {
+        Self {
+            item_id: format!("item_{}", Uuid::new_v4().simple()),
+            input: TurnInput::Idle,
+            transcript: TurnTranscriptState::default(),
+        }
+    }
+
+    fn ensure_started(
+        &mut self,
+        credentials: CachedCredentials,
+        outputs: mpsc::Sender<TurnOutput>,
+    ) -> Result<&mpsc::Sender<Vec<u8>>> {
+        self.ensure_started_with(|item_id| spawn_turn_for_item(item_id, credentials, outputs))
+    }
+
+    fn ensure_started_with<F>(&mut self, start: F) -> Result<&mpsc::Sender<Vec<u8>>>
+    where
+        F: FnOnce(String) -> mpsc::Sender<Vec<u8>>,
+    {
+        match self.input {
+            TurnInput::Idle => {
+                self.input = TurnInput::Open(start(self.item_id.clone()));
+            }
+            TurnInput::Open(_) => {}
+            TurnInput::Closed => return Err(anyhow!("audio was appended after commit")),
+        }
+
+        match &self.input {
+            TurnInput::Open(pcm_tx) => Ok(pcm_tx),
+            TurnInput::Idle | TurnInput::Closed => unreachable!("turn input was just opened"),
+        }
+    }
+
+    fn close_input(&mut self) {
+        self.input = TurnInput::Closed;
+    }
+}
+
+#[derive(Debug)]
+enum TurnOutput {
+    AsrEvent {
+        item_id: String,
+        event: AsrEvent,
+    },
+    Finished {
+        item_id: String,
+        result: Result<String, String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientAction {
+    Continue,
+    CloseSocket,
+}
+
+enum SocketMessage {
+    ClientEvent(String),
+    Close,
+}
+
 impl RuntimeConfig {
     fn new(config: ServerConfig) -> Self {
         Self {
@@ -248,24 +352,82 @@ async fn read_http_header(stream: &mut TcpStream) -> Result<String> {
     String::from_utf8(request).context("HTTP request is not UTF-8")
 }
 
+fn spawn_turn_for_item(
+    item_id: String,
+    credentials: CachedCredentials,
+    outputs: mpsc::Sender<TurnOutput>,
+) -> mpsc::Sender<Vec<u8>> {
+    let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(256);
+    let (asr_tx, mut asr_rx) = mpsc::channel::<AsrEvent>(256);
+
+    tokio::spawn(async move {
+        let asr_item_id = item_id.clone();
+        let mut asr_task =
+            tokio::spawn(async move { transcribe_pcm_channel(&credentials, pcm_rx, asr_tx).await });
+        let mut sent_finished = false;
+
+        loop {
+            tokio::select! {
+                maybe_event = asr_rx.recv() => {
+                    let Some(event) = maybe_event else {
+                        break;
+                    };
+                    if outputs
+                        .send(TurnOutput::AsrEvent {
+                            item_id: item_id.clone(),
+                            event,
+                        })
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                result = &mut asr_task => {
+                    send_turn_finished(&outputs, &asr_item_id, result).await;
+                    sent_finished = true;
+                    break;
+                }
+            }
+        }
+
+        if !sent_finished {
+            let result = asr_task.await;
+            send_turn_finished(&outputs, &asr_item_id, result).await;
+        }
+    });
+
+    pcm_tx
+}
+
+async fn send_turn_finished(
+    outputs: &mpsc::Sender<TurnOutput>,
+    item_id: &str,
+    result: std::result::Result<Result<String>, tokio::task::JoinError>,
+) {
+    let result = match result {
+        Ok(Ok(transcript)) => Ok(transcript),
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(error) => Err(format!("ASR task join failed: {error}")),
+    };
+    let _ = outputs
+        .send(TurnOutput::Finished {
+            item_id: item_id.to_string(),
+            result,
+        })
+        .await;
+}
+
 async fn handle_realtime_socket(
     ws: WebSocketStream<TcpStream>,
     credentials: CachedCredentials,
     runtime_config: Arc<RuntimeConfig>,
 ) -> Result<()> {
     let (mut write, mut read) = ws.split();
-    let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(256);
-    let (asr_tx, mut asr_rx) = mpsc::channel::<AsrEvent>(256);
-    let mut pcm_tx = Some(pcm_tx);
+    let (turn_output_tx, mut turn_output_rx) = mpsc::channel::<TurnOutput>(256);
+    let mut active_turn = ActiveTurn::new_idle();
     let mut session = RealtimeSession::new(runtime_config.model.clone());
     let mut converter = Pcm16Converter::new(session.input_sample_rate);
-    let item_id = format!("item_{}", Uuid::new_v4().simple());
-    let mut interim_transcript = String::new();
-    let mut final_transcript = String::new();
-
-    let asr_task =
-        tokio::spawn(async move { transcribe_pcm_channel(&credentials, pcm_rx, asr_tx).await });
-    tokio::pin!(asr_task);
 
     send_json(&mut write, session_created_event(&session)).await?;
 
@@ -273,70 +435,105 @@ async fn handle_realtime_socket(
         tokio::select! {
             maybe_message = read.next() => {
                 let Some(message) = maybe_message else {
-                    drop(pcm_tx.take());
+                    active_turn.close_input();
                     break;
                 };
                 match decode_socket_message(message?) {
-                    Ok(raw) => {
-                        if let Err(error) = handle_client_event(
+                    Ok(SocketMessage::ClientEvent(raw)) => {
+                        match handle_client_event(
                             &mut write,
                             &raw,
-                            &item_id,
+                            &credentials,
+                            &turn_output_tx,
                             runtime_config.as_ref(),
                             &mut session,
                             &mut converter,
-                            &mut pcm_tx,
+                            &mut active_turn,
                         ).await {
-                            send_json(&mut write, error_event(error.to_string())).await?;
+                            Ok(ClientAction::Continue) => {}
+                            Ok(ClientAction::CloseSocket) => {
+                                break;
+                            }
+                            Err(error) => {
+                                send_json(&mut write, error_event(error.to_string())).await?;
+                            }
                         }
+                    }
+                    Ok(SocketMessage::Close) => {
+                        active_turn.close_input();
+                        break;
                     }
                     Err(error) => {
                         send_json(&mut write, error_event(error.to_string())).await?;
                     }
                 }
             }
-            maybe_event = asr_rx.recv() => {
-                let Some(event) = maybe_event else {
-                    continue;
+            maybe_output = turn_output_rx.recv() => {
+                let Some(output) = maybe_output else {
+                    break;
                 };
-                match event {
-                    AsrEvent::InterimResult(text) if !text.is_empty() => {
-                        let delta = interim_delta(&mut interim_transcript, &text);
-                        if !delta.is_empty() {
-                            send_json(&mut write, transcript_delta_event(&item_id, &delta)).await?;
+                match output {
+                    TurnOutput::AsrEvent { item_id, event } => {
+                        if item_id != active_turn.item_id {
+                            continue;
+                        }
+                        match event {
+                            AsrEvent::InterimResult(text) if !text.is_empty() => {
+                                if let Some(delta) = active_turn.transcript.interim_delta(&text) {
+                                    send_json(&mut write, transcript_delta_event(&item_id, &delta)).await?;
+                                }
+                            }
+                            AsrEvent::FinalResult(text) if !text.is_empty() => {
+                                if let Some(transcript) = active_turn.transcript.append_final(&text) {
+                                    send_json(&mut write, transcript_completed_event(&item_id, &transcript)).await?;
+                                }
+                            }
+                            AsrEvent::SessionFinished => {
+                                send_json(
+                                    &mut write,
+                                    transcript_completed_event(
+                                        &item_id,
+                                        &active_turn.transcript.final_transcript,
+                                    ),
+                                )
+                                .await?;
+                                active_turn = ActiveTurn::new_idle();
+                            }
+                            AsrEvent::Error(message) => {
+                                send_json(&mut write, error_event(message)).await?;
+                                active_turn = ActiveTurn::new_idle();
+                            }
+                            _ => {}
                         }
                     }
-                    AsrEvent::FinalResult(text) if !text.is_empty() => {
-                        if let Some(transcript) =
-                            append_final_transcript(&mut final_transcript, &text)
-                        {
-                            send_json(&mut write, transcript_completed_event(&item_id, &transcript)).await?;
+                    TurnOutput::Finished { item_id, result } => {
+                        if item_id != active_turn.item_id {
+                            continue;
+                        }
+                        match result {
+                            Ok(transcript) => {
+                                if active_turn.transcript.final_transcript.is_empty()
+                                    && !transcript.is_empty()
+                                {
+                                    active_turn.transcript.final_transcript = transcript;
+                                }
+                                send_json(
+                                    &mut write,
+                                    transcript_completed_event(
+                                        &item_id,
+                                        &active_turn.transcript.final_transcript,
+                                    ),
+                                )
+                                .await?;
+                                active_turn = ActiveTurn::new_idle();
+                            }
+                            Err(message) => {
+                                send_json(&mut write, error_event(message)).await?;
+                                active_turn = ActiveTurn::new_idle();
+                            }
                         }
                     }
-                    AsrEvent::SessionFinished => {
-                        send_json(&mut write, transcript_completed_event(&item_id, &final_transcript)).await?;
-                        break;
-                    }
-                    AsrEvent::Error(message) => {
-                        send_json(&mut write, error_event(message)).await?;
-                        break;
-                    }
-                    _ => {}
                 }
-            }
-            result = &mut asr_task => {
-                match result.context("ASR task join failed")? {
-                    Ok(transcript) => {
-                        if final_transcript.is_empty() {
-                            final_transcript = transcript;
-                        }
-                        send_json(&mut write, transcript_completed_event(&item_id, &final_transcript)).await?;
-                    }
-                    Err(error) => {
-                        send_json(&mut write, error_event(error.to_string())).await?;
-                    }
-                }
-                break;
             }
         }
     }
@@ -348,13 +545,17 @@ async fn handle_realtime_socket(
 async fn handle_client_event(
     write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     raw: &str,
-    item_id: &str,
+    credentials: &CachedCredentials,
+    turn_output_tx: &mpsc::Sender<TurnOutput>,
     runtime_config: &RuntimeConfig,
     session: &mut RealtimeSession,
     converter: &mut Pcm16Converter,
-    pcm_tx: &mut Option<mpsc::Sender<Vec<u8>>>,
-) -> Result<()> {
-    match decode_client_event(raw)? {
+    active_turn: &mut ActiveTurn,
+) -> Result<ClientAction> {
+    let event = decode_client_event(raw)?;
+    let action = client_action_for_event(&event);
+
+    match event {
         ClientEvent::SessionUpdate(update) => {
             let rate_changed = update.apply_to(session, &runtime_config.model)?;
             if rate_changed {
@@ -363,9 +564,7 @@ async fn handle_client_event(
             send_json(write, session_updated_event(session)).await?;
         }
         ClientEvent::AppendAudio(audio) => {
-            let Some(tx) = pcm_tx else {
-                return Err(anyhow!("audio was appended after commit"));
-            };
+            let tx = active_turn.ensure_started(credentials.clone(), turn_output_tx.clone())?;
             let pcm = converter.push(&audio);
             if !pcm.is_empty() {
                 tx.send(pcm).await.context("ASR audio channel closed")?;
@@ -376,16 +575,23 @@ async fn handle_client_event(
             send_json(write, input_audio_cleared_event()).await?;
         }
         ClientEvent::Commit => {
-            drop(pcm_tx.take());
-            send_json(write, input_audio_committed_event(item_id)).await?;
+            active_turn.ensure_started(credentials.clone(), turn_output_tx.clone())?;
+            active_turn.close_input();
+            send_json(write, input_audio_committed_event(&active_turn.item_id)).await?;
         }
         ClientEvent::Close => {
-            drop(pcm_tx.take());
-            send_json(write, input_audio_committed_event(item_id)).await?;
+            active_turn.close_input();
         }
     }
 
-    Ok(())
+    Ok(action)
+}
+
+fn client_action_for_event(event: &ClientEvent) -> ClientAction {
+    match event {
+        ClientEvent::Close => ClientAction::CloseSocket,
+        _ => ClientAction::Continue,
+    }
 }
 
 async fn send_json(
@@ -396,33 +602,15 @@ async fn send_json(
     Ok(())
 }
 
-fn decode_socket_message(message: Message) -> Result<String> {
+fn decode_socket_message(message: Message) -> Result<SocketMessage> {
     match message {
-        Message::Text(text) => Ok(text.to_string()),
-        Message::Binary(bytes) => {
-            String::from_utf8(bytes.to_vec()).context("binary message is not UTF-8")
-        }
-        Message::Close(_) => Ok(r#"{"type":"session.close"}"#.to_string()),
+        Message::Text(text) => Ok(SocketMessage::ClientEvent(text.to_string())),
+        Message::Binary(bytes) => Ok(SocketMessage::ClientEvent(
+            String::from_utf8(bytes.to_vec()).context("binary message is not UTF-8")?,
+        )),
+        Message::Close(_) => Ok(SocketMessage::Close),
         _ => Err(anyhow!("unsupported websocket message")),
     }
-}
-
-fn interim_delta(previous: &mut String, current: &str) -> String {
-    let delta = current
-        .strip_prefix(previous.as_str())
-        .unwrap_or(current)
-        .to_string();
-    previous.clear();
-    previous.push_str(current);
-    delta
-}
-
-fn append_final_transcript(transcript: &mut String, text: &str) -> Option<String> {
-    if text.is_empty() {
-        return None;
-    }
-    transcript.push_str(text);
-    Some(transcript.clone())
 }
 
 fn reset_audio_buffer_converter(converter: &mut Pcm16Converter, session: &RealtimeSession) {
@@ -558,46 +746,101 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use crate::config::ServerConfig;
-    use crate::realtime::RealtimeSession;
+    use crate::realtime::{decode_client_event, RealtimeSession};
+    use tokio::sync::mpsc;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    use tokio_tungstenite::tungstenite::Message;
 
     use super::{
-        append_final_transcript, encode_query_component, interim_delta, redact_api_key,
+        client_action_for_event, decode_socket_message, encode_query_component, redact_api_key,
         reset_audio_buffer_converter, selected_realtime_subprotocol, validate_api_key,
-        validate_realtime_request, Pcm16Converter, RuntimeConfig,
+        validate_realtime_request, ActiveTurn, ClientAction, Pcm16Converter, RuntimeConfig,
+        SocketMessage, TurnInput, TurnTranscriptState,
     };
 
     #[test]
-    fn interim_delta_sends_only_new_suffix_for_growing_snapshots() {
-        let mut previous = String::new();
+    fn turn_transcript_state_emits_incremental_delta() {
+        let mut state = TurnTranscriptState::default();
 
-        assert_eq!(interim_delta(&mut previous, "你好"), "你好");
-        assert_eq!(interim_delta(&mut previous, "你好啊"), "啊");
-        assert_eq!(interim_delta(&mut previous, "你好啊，你是谁"), "，你是谁");
-        assert_eq!(previous, "你好啊，你是谁");
+        assert_eq!(state.interim_delta("你好"), Some("你好".to_string()));
+        assert_eq!(state.interim_delta("你好世界"), Some("世界".to_string()));
+        assert_eq!(state.interim_delta("你好世界"), None);
     }
 
     #[test]
-    fn interim_delta_resends_current_text_when_snapshot_is_rewritten() {
-        let mut previous = "你好啊".to_string();
+    fn turn_transcript_state_accumulates_final_text() {
+        let mut state = TurnTranscriptState::default();
 
-        assert_eq!(interim_delta(&mut previous, "您好"), "您好");
-        assert_eq!(previous, "您好");
+        assert_eq!(state.append_final("你好"), Some("你好".to_string()));
+        assert_eq!(state.append_final("，世界"), Some("你好，世界".to_string()));
+        assert_eq!(state.append_final(""), None);
     }
 
     #[test]
-    fn append_final_transcript_returns_live_snapshot() {
-        let mut transcript = String::new();
+    fn active_turn_generates_distinct_item_ids() {
+        let first = ActiveTurn::new_idle();
+        let second = ActiveTurn::new_idle();
 
-        assert_eq!(
-            append_final_transcript(&mut transcript, "你好啊，"),
-            Some("你好啊，".to_string())
-        );
-        assert_eq!(
-            append_final_transcript(&mut transcript, "hello。"),
-            Some("你好啊，hello。".to_string())
-        );
-        assert_eq!(transcript, "你好啊，hello。");
+        assert!(first.item_id.starts_with("item_"));
+        assert!(second.item_id.starts_with("item_"));
+        assert_ne!(first.item_id, second.item_id);
+    }
+
+    #[test]
+    fn active_turn_starts_idle_with_item_id() {
+        let turn = ActiveTurn::new_idle();
+
+        assert!(turn.item_id.starts_with("item_"));
+        assert!(matches!(turn.input, TurnInput::Idle));
+    }
+
+    #[test]
+    fn active_turn_closing_idle_marks_closed_and_prevents_start() {
+        let mut turn = ActiveTurn::new_idle();
+
+        turn.close_input();
+
+        assert!(matches!(turn.input, TurnInput::Closed));
+        let (pcm_tx, _pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+        assert!(turn.ensure_started_with(|_| pcm_tx).is_err());
+    }
+
+    #[test]
+    fn active_turn_first_start_opens_once_without_changing_item_id() {
+        let mut turn = ActiveTurn::new_idle();
+        let item_id = turn.item_id.clone();
+        let mut starts = 0;
+
+        turn.ensure_started_with(|_| {
+            starts += 1;
+            let (pcm_tx, _pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+            pcm_tx
+        })
+        .expect("first start");
+        turn.ensure_started_with(|_| {
+            starts += 1;
+            let (pcm_tx, _pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+            pcm_tx
+        })
+        .expect("second start reuses open input");
+
+        assert_eq!(starts, 1);
+        assert_eq!(turn.item_id, item_id);
+        assert!(matches!(turn.input, TurnInput::Open(_)));
+    }
+
+    #[test]
+    fn client_action_closes_socket_for_session_close() {
+        let event = decode_client_event(r#"{"type":"session.close"}"#).expect("close event");
+
+        assert_eq!(client_action_for_event(&event), ClientAction::CloseSocket);
+    }
+
+    #[test]
+    fn websocket_close_decodes_to_socket_close_control() {
+        let message = decode_socket_message(Message::Close(None)).expect("close frame");
+
+        assert!(matches!(message, SocketMessage::Close));
     }
 
     #[test]
