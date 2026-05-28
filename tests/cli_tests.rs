@@ -1,13 +1,14 @@
 use clap::Parser;
 use seedrelay::cli::Cli;
+use seedrelay::config::{DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
 
 #[test]
 fn parses_default_server_cli() {
     let cli = Cli::parse_from(["seedrelay"]);
 
-    assert_eq!(cli.host, "0.0.0.0");
-    assert_eq!(cli.port, 8000);
-    assert_eq!(cli.model, "seed-asr");
+    assert_eq!(cli.host, DEFAULT_HOST);
+    assert_eq!(cli.port, DEFAULT_PORT);
+    assert_eq!(cli.model, DEFAULT_MODEL);
     assert!(cli.api_key.is_none());
     assert!(!cli.webui);
 }

@@ -1,6 +1,8 @@
-use seedrelay::web::{
-    http_response, http_response_with_config, WebRuntimeConfig, APP_JS, INDEX_HTML, STYLES_CSS,
-};
+use seedrelay::web::{http_response_with_config, WebRuntimeConfig, APP_JS, INDEX_HTML, STYLES_CSS};
+
+fn default_web_response(method: &str, target: &str) -> Option<String> {
+    http_response_with_config(method, target, &WebRuntimeConfig::default(), true)
+}
 
 #[test]
 fn index_html_loads_runtime_config_for_realtime_endpoint() {
@@ -216,7 +218,7 @@ fn index_html_uses_smaller_transcript_body_type() {
 
 #[test]
 fn renders_index_page_response() {
-    let response = http_response("GET", "/").expect("index response");
+    let response = default_web_response("GET", "/").expect("index response");
 
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(response.contains("content-type: text/html; charset=utf-8\r\n"));
@@ -225,8 +227,8 @@ fn renders_index_page_response() {
 
 #[test]
 fn serves_static_web_assets() {
-    let css = http_response("GET", "/styles.css").expect("css response");
-    let js = http_response("GET", "/app.js").expect("js response");
+    let css = default_web_response("GET", "/styles.css").expect("css response");
+    let js = default_web_response("GET", "/app.js").expect("js response");
 
     assert!(css.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(css.contains("content-type: text/css; charset=utf-8\r\n"));
@@ -253,7 +255,7 @@ fn serves_runtime_web_config() {
 
 #[test]
 fn default_runtime_web_config_has_no_api_key() {
-    let response = http_response("GET", "/config.json").expect("config response");
+    let response = default_web_response("GET", "/config.json").expect("config response");
 
     assert!(response.contains(r#""model":"seed-asr""#));
     assert!(response.contains(r#""apiKey":null"#));
@@ -261,7 +263,7 @@ fn default_runtime_web_config_has_no_api_key() {
 
 #[test]
 fn rejects_unknown_http_path() {
-    let response = http_response("GET", "/missing").expect("404 response");
+    let response = default_web_response("GET", "/missing").expect("404 response");
 
     assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
 }

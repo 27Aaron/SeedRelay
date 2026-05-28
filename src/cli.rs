@@ -1,18 +1,20 @@
 use clap::Parser;
 
+use crate::config::{DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
+
 #[derive(Debug, Parser)]
 #[command(
     name = "seedrelay",
     about = "SeedRelay: local OpenAI-style Realtime transcription bridge for Seed-ASR"
 )]
 pub struct Cli {
-    #[arg(long, default_value = "0.0.0.0")]
+    #[arg(long, default_value = DEFAULT_HOST)]
     pub host: String,
 
-    #[arg(long, default_value_t = 8000)]
+    #[arg(long, default_value_t = DEFAULT_PORT)]
     pub port: u16,
 
-    #[arg(long, default_value = "seed-asr")]
+    #[arg(long, default_value = DEFAULT_MODEL)]
     pub model: String,
 
     #[arg(long)]

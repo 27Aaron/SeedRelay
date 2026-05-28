@@ -146,7 +146,6 @@ fn decodes_nested_session_update_fields() {
             transcription_model: Some("seed-asr".into()),
             language: Some("zh".into()),
             delay: None,
-            turn_detection_disabled: true,
             include: Vec::new(),
         })
     );
@@ -167,7 +166,6 @@ fn accepts_browser_session_update_sample_rates() {
                 transcription_model: None,
                 language: None,
                 delay: None,
-                turn_detection_disabled: false,
                 include: Vec::new(),
             })
         );
@@ -303,7 +301,6 @@ fn rejected_session_update_does_not_mutate_session() {
         transcription_model: Some("seed-asr".into()),
         language: Some("zh".into()),
         delay: None,
-        turn_detection_disabled: false,
         include: vec!["item.input_audio_transcription.logprobs".into()],
     };
 
@@ -320,7 +317,6 @@ fn applies_session_update_to_realtime_session() {
         transcription_model: Some("seed-asr".into()),
         language: Some("zh".into()),
         delay: None,
-        turn_detection_disabled: true,
         include: Vec::new(),
     };
 
@@ -345,7 +341,6 @@ fn rejects_unsupported_session_update_apply_fields_without_mutation() {
                 transcription_model: None,
                 language: None,
                 delay: None,
-                turn_detection_disabled: false,
                 include: Vec::new(),
             },
             "only audio/pcm",
@@ -357,7 +352,6 @@ fn rejects_unsupported_session_update_apply_fields_without_mutation() {
                 transcription_model: Some("other-asr".into()),
                 language: None,
                 delay: None,
-                turn_detection_disabled: false,
                 include: Vec::new(),
             },
             "only transcription model",
@@ -369,7 +363,6 @@ fn rejects_unsupported_session_update_apply_fields_without_mutation() {
                 transcription_model: None,
                 language: None,
                 delay: None,
-                turn_detection_disabled: false,
                 include: vec!["item.input_audio_transcription.logprobs".into()],
             },
             "session.include",
@@ -381,7 +374,6 @@ fn rejects_unsupported_session_update_apply_fields_without_mutation() {
                 transcription_model: None,
                 language: None,
                 delay: Some("500ms".into()),
-                turn_detection_disabled: false,
                 include: Vec::new(),
             },
             "delay",
@@ -507,7 +499,6 @@ fn session_events_reflect_applied_language_and_sample_rate() {
         transcription_model: None,
         language: Some("en".into()),
         delay: None,
-        turn_detection_disabled: false,
         include: Vec::new(),
     }
     .apply_to(&mut session, "seed-asr")

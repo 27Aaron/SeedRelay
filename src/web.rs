@@ -24,10 +24,6 @@ impl Default for WebRuntimeConfig {
     }
 }
 
-pub fn http_response(method: &str, target: &str) -> Option<String> {
-    http_response_with_config(method, target, &WebRuntimeConfig::default(), true)
-}
-
 pub fn http_response_with_config(
     method: &str,
     target: &str,

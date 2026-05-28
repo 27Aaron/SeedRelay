@@ -52,40 +52,6 @@ pub fn interleaved_f32_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
         .collect()
 }
 
-pub fn interleaved_i16_to_mono_f32(samples: &[i16], channels: usize) -> Vec<f32> {
-    if channels == 0 {
-        return Vec::new();
-    }
-
-    samples
-        .chunks_exact(channels)
-        .map(|frame| {
-            frame
-                .iter()
-                .map(|sample| *sample as f32 / i16::MAX as f32)
-                .sum::<f32>()
-                / channels as f32
-        })
-        .collect()
-}
-
-pub fn interleaved_u16_to_mono_f32(samples: &[u16], channels: usize) -> Vec<f32> {
-    if channels == 0 {
-        return Vec::new();
-    }
-
-    samples
-        .chunks_exact(channels)
-        .map(|frame| {
-            frame
-                .iter()
-                .map(|sample| (*sample as f32 - 32768.0) / 32768.0)
-                .sum::<f32>()
-                / channels as f32
-        })
-        .collect()
-}
-
 pub struct LinearPcmResampler {
     input_sample_rate: u32,
     output_sample_rate: u32,

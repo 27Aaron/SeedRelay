@@ -17,7 +17,6 @@ pub enum AsrEvent {
     FinalResult(String),
     Heartbeat,
     Error(String),
-    Unknown,
 }
 
 pub fn classify_response(response: &WireResponse) -> AsrEvent {

@@ -29,7 +29,6 @@ pub struct SessionUpdateConfig {
     pub transcription_model: Option<String>,
     pub language: Option<String>,
     pub delay: Option<String>,
-    pub turn_detection_disabled: bool,
     pub include: Vec<String>,
 }
 
@@ -146,7 +145,6 @@ fn parse_session_update(value: &Value) -> Result<SessionUpdateConfig> {
             "/session/audio/input/transcription/delay",
             "session.audio.input.transcription.delay",
         )?,
-        turn_detection_disabled: turn_detection == Some(&Value::Null),
         include,
     })
 }
