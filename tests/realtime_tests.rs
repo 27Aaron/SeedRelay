@@ -1,9 +1,10 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use seedrelay::config::DEFAULT_MODEL;
 use seedrelay::realtime::{
-    decode_client_event, model_list_response, model_not_found_error, model_object_response,
-    session_updated_event, transcript_completed_event, transcript_delta_event,
-    validate_realtime_target, ClientEvent,
+    decode_client_event, error_event, model_list_response, model_not_found_error,
+    model_object_response, session_created_event, session_updated_event,
+    transcript_completed_event, transcript_delta_event, validate_realtime_target, ClientEvent,
+    RealtimeSession,
 };
 
 #[test]
@@ -32,13 +33,16 @@ fn decodes_append_event_audio_payload() {
 
 #[test]
 fn renders_openai_style_transcript_events() {
-    let session = session_updated_event("custom-asr");
+    let session = RealtimeSession::with_id("sess_test", "custom-asr");
+    let updated = session_updated_event(&session);
     let delta = transcript_delta_event("item-1", "你好");
     let completed = transcript_completed_event("item-1", "你好，世界");
 
-    assert_eq!(session["session"]["model"], "custom-asr");
+    assert_eq!(updated["type"], "session.updated");
+    assert_eq!(updated["session"]["id"], "sess_test");
+    assert_eq!(updated["session"]["model"], "custom-asr");
     assert_eq!(
-        session["session"]["audio"]["input"]["transcription"]["model"],
+        updated["session"]["audio"]["input"]["transcription"]["model"],
         "custom-asr"
     );
     assert_eq!(
@@ -93,4 +97,38 @@ fn renders_model_not_found_error_response() {
         .as_str()
         .expect("message")
         .contains("missing-asr"));
+}
+
+#[test]
+fn renders_session_created_event_with_session_id() {
+    let session = RealtimeSession::with_id("sess_test", "seed-asr");
+    let event = session_created_event(&session);
+
+    assert_eq!(event["type"], "session.created");
+    assert!(event["event_id"]
+        .as_str()
+        .expect("event id")
+        .starts_with("event_"));
+    assert_eq!(event["session"]["id"], "sess_test");
+    assert_eq!(event["session"]["type"], "transcription");
+    assert_eq!(event["session"]["model"], "seed-asr");
+    assert_eq!(
+        event["session"]["audio"]["input"]["format"]["type"],
+        "audio/pcm"
+    );
+    assert_eq!(event["session"]["audio"]["input"]["format"]["rate"], 24_000);
+}
+
+#[test]
+fn renders_error_events_with_openai_style_fields() {
+    let event = error_event("bad audio");
+
+    assert_eq!(event["type"], "error");
+    assert!(event["event_id"]
+        .as_str()
+        .expect("event id")
+        .starts_with("event_"));
+    assert_eq!(event["error"]["type"], "invalid_request_error");
+    assert_eq!(event["error"]["code"], "invalid_request");
+    assert_eq!(event["error"]["message"], "bad audio");
 }

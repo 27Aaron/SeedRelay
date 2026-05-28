@@ -21,8 +21,9 @@ use crate::config::ServerConfig;
 use crate::credentials::{ensure_credentials, CachedCredentials, USER_AGENT};
 use crate::realtime::query_param;
 use crate::realtime::{
-    decode_client_event, error_event, input_audio_committed_event, session_updated_event,
-    transcript_completed_event, transcript_delta_event, validate_realtime_target, ClientEvent,
+    decode_client_event, error_event, input_audio_committed_event, session_created_event,
+    session_updated_event, transcript_completed_event, transcript_delta_event,
+    validate_realtime_target, ClientEvent, RealtimeSession,
 };
 use crate::response::AsrEvent;
 use crate::web::{http_response_with_config, WebRuntimeConfig};
@@ -232,7 +233,8 @@ async fn handle_realtime_socket(
     let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(256);
     let (asr_tx, mut asr_rx) = mpsc::channel::<AsrEvent>(256);
     let mut pcm_tx = Some(pcm_tx);
-    let mut converter = Pcm16Converter::new(24_000);
+    let mut session = RealtimeSession::new(runtime_config.model.clone());
+    let mut converter = Pcm16Converter::new(session.input_sample_rate);
     let item_id = format!("item_{}", Uuid::new_v4().simple());
     let mut interim_transcript = String::new();
     let mut final_transcript = String::new();
@@ -241,7 +243,7 @@ async fn handle_realtime_socket(
         tokio::spawn(async move { transcribe_pcm_channel(&credentials, pcm_rx, asr_tx).await });
     tokio::pin!(asr_task);
 
-    send_json(&mut write, session_updated_event(&runtime_config.model)).await?;
+    send_json(&mut write, session_created_event(&session)).await?;
 
     loop {
         tokio::select! {
@@ -257,6 +259,7 @@ async fn handle_realtime_socket(
                             &raw,
                             &item_id,
                             runtime_config.as_ref(),
+                            &mut session,
                             &mut converter,
                             &mut pcm_tx,
                         ).await {
@@ -323,15 +326,18 @@ async fn handle_client_event(
     raw: &str,
     item_id: &str,
     runtime_config: &RuntimeConfig,
+    session: &mut RealtimeSession,
     converter: &mut Pcm16Converter,
     pcm_tx: &mut Option<mpsc::Sender<Vec<u8>>>,
 ) -> Result<()> {
     match decode_client_event(raw)? {
         ClientEvent::SessionUpdate { input_sample_rate } => {
             if let Some(rate) = input_sample_rate {
+                session.input_sample_rate = rate;
                 *converter = Pcm16Converter::new(rate);
             }
-            send_json(write, session_updated_event(&runtime_config.model)).await?;
+            session.model = runtime_config.model.clone();
+            send_json(write, session_updated_event(session)).await?;
         }
         ClientEvent::AppendAudio(audio) => {
             let Some(tx) = pcm_tx else {

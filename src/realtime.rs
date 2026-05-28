@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 pub const REALTIME_PATH: &str = "/v1/realtime";
 pub const MODEL_OBJECT: &str = "model";
@@ -90,23 +91,92 @@ pub fn model_not_found_error(model: &str) -> Value {
     })
 }
 
-pub fn session_updated_event(model: &str) -> Value {
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RealtimeSession {
+    pub id: String,
+    pub model: String,
+    pub input_sample_rate: u32,
+    pub input_audio_format_type: String,
+    pub language: Option<String>,
+}
+
+impl RealtimeSession {
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            id: format!("sess_{}", Uuid::new_v4().simple()),
+            model: model.into(),
+            input_sample_rate: 24_000,
+            input_audio_format_type: "audio/pcm".into(),
+            language: None,
+        }
+    }
+
+    pub fn with_id(id: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            model: model.into(),
+            input_sample_rate: 24_000,
+            input_audio_format_type: "audio/pcm".into(),
+            language: None,
+        }
+    }
+}
+
+fn event_id() -> String {
+    format!("event_{}", Uuid::new_v4().simple())
+}
+
+pub fn session_created_event(session: &RealtimeSession) -> Value {
+    json!({
+        "type": "session.created",
+        "event_id": event_id(),
+        "session": session_json(session),
+    })
+}
+
+pub fn session_updated_event(session: &RealtimeSession) -> Value {
     json!({
         "type": "session.updated",
-        "session": {
-            "type": "transcription",
-            "model": model,
-            "audio": {
-                "input": {
-                    "format": {
-                        "type": "audio/pcm",
-                        "rate": 24_000
-                    },
-                    "transcription": {
-                        "model": model
-                    }
-                }
+        "event_id": event_id(),
+        "session": session_json(session),
+    })
+}
+
+fn session_json(session: &RealtimeSession) -> Value {
+    let transcription = match &session.language {
+        Some(language) => json!({
+            "model": session.model.as_str(),
+            "language": language.as_str(),
+        }),
+        None => json!({
+            "model": session.model.as_str(),
+        }),
+    };
+
+    json!({
+        "id": session.id.as_str(),
+        "type": "transcription",
+        "model": session.model.as_str(),
+        "audio": {
+            "input": {
+                "format": {
+                    "type": session.input_audio_format_type.as_str(),
+                    "rate": session.input_sample_rate
+                },
+                "transcription": transcription
             }
+        }
+    })
+}
+
+pub fn error_event(message: impl Into<String>) -> Value {
+    json!({
+        "type": "error",
+        "event_id": event_id(),
+        "error": {
+            "type": "invalid_request_error",
+            "code": "invalid_request",
+            "message": message.into(),
         }
     })
 }
@@ -133,16 +203,6 @@ pub fn transcript_completed_event(item_id: &str, transcript: &str) -> Value {
         "item_id": item_id,
         "content_index": 0,
         "transcript": transcript,
-    })
-}
-
-pub fn error_event(message: impl Into<String>) -> Value {
-    json!({
-        "type": "error",
-        "error": {
-            "type": "invalid_request_error",
-            "message": message.into(),
-        }
     })
 }
 
