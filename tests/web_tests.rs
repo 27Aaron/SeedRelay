@@ -50,6 +50,28 @@ fn index_html_stops_capture_before_committing_audio() {
 }
 
 #[test]
+fn app_js_applies_audio_backpressure_and_batching() {
+    assert!(APP_JS.contains("const MAX_WS_BUFFERED_BYTES = 512 * 1024;"));
+    assert!(APP_JS.contains("const AUDIO_BATCH_MS = 20;"));
+    assert!(APP_JS.contains("ws.bufferedAmount > MAX_WS_BUFFERED_BYTES"));
+    assert!(APP_JS.contains("flushAudioBatch()"));
+    assert!(APP_JS.contains("pendingAudioSamples"));
+}
+
+#[test]
+fn app_js_reports_websocket_close_and_error_details() {
+    assert!(APP_JS.contains("function formatCloseReason(event)"));
+    assert!(APP_JS.contains("event.code"));
+    assert!(APP_JS.contains("event.reason"));
+    assert!(APP_JS.contains("event.wasClean"));
+    assert!(APP_JS.contains("ws.addEventListener(\"close\", (event) =>"));
+    assert!(APP_JS.contains("log(reason, \"socket\")"));
+    assert!(APP_JS.contains("function formatSocketError(event)"));
+    assert!(APP_JS.contains("typeof event.message === \"string\""));
+    assert!(APP_JS.contains("log(formatSocketError(event), \"error\")"));
+}
+
+#[test]
 fn index_html_keeps_brand_on_one_line() {
     assert!(INDEX_HTML.contains(r#"<h1 class="wordmark" aria-label="Seed Relay">"#));
     assert!(INDEX_HTML.contains(r#"<span>Seed</span>"#));

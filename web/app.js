@@ -38,6 +38,8 @@ let signalAnimationFrame = null;
 let lastSignalFrameAt = 0;
 const MAX_TRANSCRIPT_LINE = 12;
 const MAX_EVENT_LINES = 5;
+const MAX_WS_BUFFERED_BYTES = 512 * 1024;
+const AUDIO_BATCH_MS = 20;
 const SIGNAL_EASING = 0.18;
 const SIGNAL_IDLE_THRESHOLD = 0.08;
 const API_KEY_STORAGE_KEY = "seedrelay.apiKey";
@@ -47,6 +49,9 @@ const DEFAULT_RUNTIME_CONFIG = {
 };
 let runtimeConfig = { ...DEFAULT_RUNTIME_CONFIG };
 let configReady = Promise.resolve();
+let pendingAudioSamples = [];
+let pendingAudioSampleCount = 0;
+let lastBackpressureLogAt = 0;
 
 const workletSource = `
   class CaptureProcessor extends AudioWorkletProcessor {
@@ -133,6 +138,20 @@ function setSocket(state, ok = false) {
 function setAudio(state, bad = false) {
   els.audioState.textContent = state;
   els.audioState.className = bad ? "bad" : "";
+}
+
+function formatCloseReason(event) {
+  const parts = [`code ${event.code}`];
+  if (event.reason) parts.push(event.reason);
+  if (!event.wasClean) parts.push("unclean");
+  return `closed (${parts.join(", ")})`;
+}
+
+function formatSocketError(event) {
+  if (event && typeof event.message === "string" && event.message) {
+    return event.message;
+  }
+  return "websocket error";
 }
 
 function signalStateForPeak(peak) {
@@ -239,6 +258,56 @@ function pcm16Base64(samples) {
 function sendJson(payload) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify(payload));
+}
+
+function resetAudioBatch() {
+  pendingAudioSamples = [];
+  pendingAudioSampleCount = 0;
+}
+
+function enqueueAudioSamples(samples) {
+  pendingAudioSamples.push(samples);
+  pendingAudioSampleCount += samples.length;
+
+  const batchSamples = Math.max(
+    1,
+    Math.round((audioContext.sampleRate * AUDIO_BATCH_MS) / 1000),
+  );
+  if (pendingAudioSampleCount >= batchSamples) {
+    flushAudioBatch();
+  }
+}
+
+function flushAudioBatch() {
+  if (!pendingAudioSampleCount) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    resetAudioBatch();
+    return;
+  }
+
+  if (ws.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
+    resetAudioBatch();
+    const now = Date.now();
+    if (now - lastBackpressureLogAt > 1000) {
+      lastBackpressureLogAt = now;
+      log("audio dropped while websocket is backed up", "warn");
+    }
+    return;
+  }
+
+  const batch = new Float32Array(pendingAudioSampleCount);
+  let offset = 0;
+  for (const samples of pendingAudioSamples) {
+    batch.set(samples, offset);
+    offset += samples.length;
+  }
+  resetAudioBatch();
+  frameCount += 1;
+  els.frames.textContent = String(frameCount);
+  sendJson({
+    type: "input_audio_buffer.append",
+    audio: pcm16Base64(batch),
+  });
 }
 
 function setText(el, text) {
@@ -419,12 +488,7 @@ async function start() {
       mutedOutput.gain.value = 0;
       worklet.port.onmessage = (event) => {
         if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
-        frameCount += 1;
-        els.frames.textContent = String(frameCount);
-        sendJson({
-          type: "input_audio_buffer.append",
-          audio: pcm16Base64(event.data),
-        });
+        enqueueAudioSamples(event.data);
       };
       source.connect(worklet);
       worklet.connect(mutedOutput);
@@ -455,14 +519,16 @@ async function start() {
       }
     });
 
-    ws.addEventListener("close", () => {
-      setSocket("closed");
+    ws.addEventListener("close", (event) => {
+      const reason = formatCloseReason(event);
+      setSocket(reason);
+      log(reason, "socket");
       cleanupAudio();
     });
 
-    ws.addEventListener("error", () => {
+    ws.addEventListener("error", (event) => {
       setSocket("error");
-      log("websocket error", "error");
+      log(formatSocketError(event), "error");
     });
   } catch (error) {
     els.start.disabled = false;
@@ -475,6 +541,7 @@ async function start() {
 
 function cleanupAudio() {
   isRecording = false;
+  resetAudioBatch();
   if (worklet) worklet.disconnect();
   if (source) source.disconnect();
   if (mutedOutput) mutedOutput.disconnect();
@@ -497,6 +564,7 @@ function cleanupAudio() {
 
 function stop() {
   isRecording = false;
+  flushAudioBatch();
   cleanupAudio();
   setAudio("committed");
   sendJson({ type: "input_audio_buffer.commit" });
