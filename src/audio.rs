@@ -43,17 +43,6 @@ pub fn silence_frame(config: AudioConfig) -> Vec<u8> {
     vec![0u8; config.bytes_per_frame]
 }
 
-pub fn interleaved_f32_to_mono(samples: &[f32], channels: usize) -> Vec<f32> {
-    if channels == 0 {
-        return Vec::new();
-    }
-
-    samples
-        .chunks_exact(channels)
-        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-        .collect()
-}
-
 pub struct LinearPcmResampler {
     input_sample_rate: u32,
     output_sample_rate: u32,

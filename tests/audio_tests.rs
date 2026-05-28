@@ -1,4 +1,4 @@
-use seedrelay::audio::{interleaved_f32_to_mono, pad_frame, AudioConfig, LinearPcmResampler};
+use seedrelay::audio::{pad_frame, AudioConfig, LinearPcmResampler};
 
 #[test]
 fn pads_partial_pcm_frame_to_20ms() {
@@ -10,13 +10,6 @@ fn pads_partial_pcm_frame_to_20ms() {
     assert_eq!(frame.len(), config.bytes_per_frame);
     assert_eq!(&frame[..10], vec![7u8; 10].as_slice());
     assert!(frame[10..].iter().all(|byte| *byte == 0));
-}
-
-#[test]
-fn averages_interleaved_f32_channels_to_mono() {
-    let mono = interleaved_f32_to_mono(&[1.0, -1.0, 0.25, 0.75], 2);
-
-    assert_eq!(mono, vec![0.0, 0.5]);
 }
 
 #[test]
