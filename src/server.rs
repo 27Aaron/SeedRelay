@@ -56,6 +56,11 @@ impl TurnTranscriptState {
         if text.is_empty() {
             return;
         }
+        if text.starts_with(&self.final_transcript) {
+            self.final_transcript.clear();
+            self.final_transcript.push_str(text);
+            return;
+        }
         self.final_transcript.push_str(text);
     }
 
@@ -813,6 +818,16 @@ mod tests {
 
         assert_eq!(state.completed_transcript(None), Some("你好，世界"));
         assert_eq!(state.completed_transcript(None), None);
+    }
+
+    #[test]
+    fn turn_transcript_state_deduplicates_cumulative_final_text() {
+        let mut state = TurnTranscriptState::default();
+
+        state.append_final("hello");
+        state.append_final("hello world");
+
+        assert_eq!(state.completed_transcript(None), Some("hello world"));
     }
 
     #[test]
