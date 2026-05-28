@@ -4,6 +4,9 @@
 # Local runtime state
 *.log
 
+# Local planning notes and generated specs
+/docs/
+
 # Environment and editor files
 .env
 .env.*
