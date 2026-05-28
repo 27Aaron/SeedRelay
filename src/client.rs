@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::{SinkExt, Stream, StreamExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -19,11 +19,14 @@ use crate::protocol::{
 use crate::response::{classify_response, AsrEvent, WireResponse};
 
 pub const WEBSOCKET_URL: &str = "wss://frontier-audio-ime-ws.doubao.com/ocean/api/v1/ws";
+const BACKEND_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const BACKEND_LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn transcribe_pcm_channel(
     credentials: &CachedCredentials,
     mut pcm_rx: mpsc::Receiver<Vec<u8>>,
     event_tx: mpsc::Sender<AsrEvent>,
+    mut abort_rx: oneshot::Receiver<()>,
 ) -> Result<String> {
     let config = AudioConfig::default();
     let mut encoder = OpusFrameEncoder::new(config)?;
@@ -43,8 +46,9 @@ pub async fn transcribe_pcm_channel(
         .headers_mut()
         .insert("x-custom-keepalive", HeaderValue::from_static("true"));
 
-    let (ws, _) = connect_async(request)
+    let (ws, _) = timeout(BACKEND_CONNECT_TIMEOUT, connect_async(request))
         .await
+        .context("timed out opening Doubao WebSocket")?
         .context("failed to open Doubao WebSocket")?;
     let (mut write, mut read) = ws.split();
     let request_id = Uuid::new_v4().to_string();
@@ -118,8 +122,29 @@ pub async fn transcribe_pcm_channel(
     let mut frame_index = 0u64;
     let mut pcm_buffer = Vec::new();
     let mut frame = vec![0u8; config.bytes_per_frame];
+    let mut abort_sender_closed = false;
 
-    while let Some(chunk) = pcm_rx.recv().await {
+    loop {
+        let chunk = tokio::select! {
+            abort = &mut abort_rx, if !abort_sender_closed => {
+                match abort {
+                    Ok(()) => {
+                        let _ = write.close().await;
+                        return Err(anyhow!("ASR turn aborted"));
+                    }
+                    Err(_) => {
+                        abort_sender_closed = true;
+                        continue;
+                    }
+                }
+            }
+            maybe_chunk = pcm_rx.recv() => {
+                let Some(chunk) = maybe_chunk else {
+                    break;
+                };
+                chunk
+            }
+        };
         pcm_buffer.extend_from_slice(&chunk);
         let mut consumed = 0usize;
         while pcm_buffer.len() - consumed >= config.bytes_per_frame {
@@ -176,6 +201,26 @@ pub async fn transcribe_pcm_channel(
 }
 
 async fn expect_lifecycle_message<S>(read: &mut S, expected: &str) -> Result<()>
+where
+    S: Stream<Item = Result<Message, WsError>> + Unpin,
+{
+    expect_lifecycle_message_with_timeout(read, expected, BACKEND_LIFECYCLE_TIMEOUT).await
+}
+
+async fn expect_lifecycle_message_with_timeout<S>(
+    read: &mut S,
+    expected: &str,
+    duration: Duration,
+) -> Result<()>
+where
+    S: Stream<Item = Result<Message, WsError>> + Unpin,
+{
+    timeout(duration, wait_for_lifecycle_message(read, expected))
+        .await
+        .with_context(|| format!("timed out waiting for {expected}"))?
+}
+
+async fn wait_for_lifecycle_message<S>(read: &mut S, expected: &str) -> Result<()>
 where
     S: Stream<Item = Result<Message, WsError>> + Unpin,
 {
@@ -262,13 +307,15 @@ fn now_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use futures_util::stream;
     use prost::Message as _;
     use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
     use crate::protocol::AsrResponse;
 
-    use super::expect_lifecycle_message;
+    use super::{expect_lifecycle_message, expect_lifecycle_message_with_timeout};
 
     fn response(message_type: &str, result_json: &str) -> Message {
         let response = AsrResponse {
@@ -294,5 +341,22 @@ mod tests {
         expect_lifecycle_message(&mut read, "TaskStarted")
             .await
             .expect("heartbeat should not fail lifecycle wait");
+    }
+
+    #[tokio::test]
+    async fn lifecycle_wait_times_out_when_backend_is_silent() {
+        let mut read = stream::pending::<Result<Message, WsError>>();
+
+        let error = expect_lifecycle_message_with_timeout(
+            &mut read,
+            "TaskStarted",
+            Duration::from_millis(1),
+        )
+        .await
+        .expect_err("silent backend should time out");
+
+        assert!(error
+            .to_string()
+            .contains("timed out waiting for TaskStarted"));
     }
 }

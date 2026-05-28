@@ -9,7 +9,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
@@ -23,15 +23,19 @@ use crate::client::transcribe_pcm_channel;
 use crate::config::ServerConfig;
 use crate::credentials::{ensure_credentials, CachedCredentials, USER_AGENT};
 use crate::realtime::{
-    decode_client_event, error_event, input_audio_cleared_event, input_audio_committed_event,
-    session_created_event, session_updated_event, transcript_completed_event,
-    transcript_delta_event, validate_realtime_target, ClientEvent, RealtimeSession,
+    backend_error_event, decode_client_event, error_event, input_audio_cleared_event,
+    input_audio_committed_event, session_created_event, session_updated_event,
+    transcript_completed_event, transcript_delta_event, validate_realtime_target, ClientEvent,
+    RealtimeSession,
 };
 use crate::response::AsrEvent;
 use crate::web::{http_response_with_config, WebRuntimeConfig};
 
 const IO_TIMEOUT_SECS: u64 = 10;
 const WS_MAX_MESSAGE_BYTES: usize = 768 * 1024;
+const PCM_QUEUE_DEPTH: usize = 32;
+const ASR_EVENT_QUEUE_DEPTH: usize = 64;
+const TURN_OUTPUT_QUEUE_DEPTH: usize = 64;
 
 #[derive(Debug, Clone)]
 struct RuntimeConfig {
@@ -119,8 +123,36 @@ struct ActiveTurn {
 #[derive(Debug)]
 enum TurnInput {
     Idle,
-    Open(mpsc::Sender<Vec<u8>>),
+    Open(TurnInputHandle),
     Closed,
+}
+
+#[derive(Debug)]
+struct TurnInputHandle {
+    pcm_tx: mpsc::Sender<Vec<u8>>,
+    abort_tx: Option<oneshot::Sender<()>>,
+}
+
+impl TurnInputHandle {
+    fn new(pcm_tx: mpsc::Sender<Vec<u8>>, abort_tx: oneshot::Sender<()>) -> Self {
+        Self {
+            pcm_tx,
+            abort_tx: Some(abort_tx),
+        }
+    }
+
+    fn abort(&mut self) {
+        if let Some(abort_tx) = self.abort_tx.take() {
+            let _ = abort_tx.send(());
+        }
+    }
+}
+
+impl From<mpsc::Sender<Vec<u8>>> for TurnInputHandle {
+    fn from(pcm_tx: mpsc::Sender<Vec<u8>>) -> Self {
+        let (abort_tx, _abort_rx) = oneshot::channel();
+        Self::new(pcm_tx, abort_tx)
+    }
 }
 
 impl ActiveTurn {
@@ -140,20 +172,21 @@ impl ActiveTurn {
         self.ensure_started_with(|item_id| spawn_turn_for_item(item_id, credentials, outputs))
     }
 
-    fn ensure_started_with<F>(&mut self, start: F) -> Result<&mpsc::Sender<Vec<u8>>>
+    fn ensure_started_with<F, H>(&mut self, start: F) -> Result<&mpsc::Sender<Vec<u8>>>
     where
-        F: FnOnce(String) -> mpsc::Sender<Vec<u8>>,
+        F: FnOnce(String) -> H,
+        H: Into<TurnInputHandle>,
     {
         match self.input {
             TurnInput::Idle => {
-                self.input = TurnInput::Open(start(self.item_id.clone()));
+                self.input = TurnInput::Open(start(self.item_id.clone()).into());
             }
             TurnInput::Open(_) => {}
             TurnInput::Closed => return Err(anyhow!("audio was appended after commit")),
         }
 
         match &self.input {
-            TurnInput::Open(pcm_tx) => Ok(pcm_tx),
+            TurnInput::Open(handle) => Ok(&handle.pcm_tx),
             TurnInput::Idle | TurnInput::Closed => unreachable!("turn input was just opened"),
         }
     }
@@ -162,8 +195,15 @@ impl ActiveTurn {
         self.input = TurnInput::Closed;
     }
 
+    fn abort_input(&mut self) {
+        if let TurnInput::Open(handle) = &mut self.input {
+            handle.abort();
+        }
+        self.input = TurnInput::Closed;
+    }
+
     fn replace_with_idle(&mut self) {
-        self.close_input();
+        self.abort_input();
         *self = Self::new_idle();
     }
 }
@@ -223,7 +263,12 @@ impl RuntimeConfig {
         )
     }
 
-    fn startup_lines(&self, bind: SocketAddr, web_enabled: bool) -> Vec<String> {
+    fn startup_lines(
+        &self,
+        bind: SocketAddr,
+        web_enabled: bool,
+        credentials_path: &Path,
+    ) -> Vec<String> {
         let lines = vec![
             "SeedRelay ready".to_string(),
             format!("  Realtime  {}", self.realtime_url(bind)),
@@ -236,6 +281,7 @@ impl RuntimeConfig {
                     "disabled"
                 }
             ),
+            format!("  Credentials {}", credentials_path.display()),
             format!(
                 "  Web UI    {}",
                 if web_enabled {
@@ -248,8 +294,8 @@ impl RuntimeConfig {
         lines
     }
 
-    fn print_startup(&self, bind: SocketAddr, web_enabled: bool) {
-        for line in self.startup_lines(bind, web_enabled) {
+    fn print_startup(&self, bind: SocketAddr, web_enabled: bool, credentials_path: &Path) {
+        for line in self.startup_lines(bind, web_enabled, credentials_path) {
             eprintln!("{line}");
         }
     }
@@ -270,7 +316,7 @@ pub async fn serve_realtime(
         .await
         .with_context(|| format!("failed to bind {bind}"))?;
 
-    runtime_config.print_startup(bind, web_enabled);
+    runtime_config.print_startup(bind, web_enabled, credentials_path);
 
     loop {
         let (stream, peer_addr) = listener.accept().await?;
@@ -346,6 +392,12 @@ fn validate_realtime_request(
         .and_then(|value| value.to_str().ok());
     validate_api_key(authorization, protocols, runtime_config.api_key.as_deref())
         .map_err(unauthorized_response)?;
+    let origin = request
+        .headers()
+        .get("origin")
+        .and_then(|value| value.to_str().ok());
+    validate_browser_origin(origin, runtime_config.api_key.as_deref())
+        .map_err(forbidden_response)?;
     if let Some(protocol) =
         response_realtime_subprotocol(protocols, runtime_config.api_key.as_deref())
     {
@@ -447,14 +499,16 @@ fn spawn_turn_for_item(
     item_id: String,
     credentials: CachedCredentials,
     outputs: mpsc::Sender<TurnOutput>,
-) -> mpsc::Sender<Vec<u8>> {
-    let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(256);
-    let (asr_tx, mut asr_rx) = mpsc::channel::<AsrEvent>(256);
+) -> TurnInputHandle {
+    let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(PCM_QUEUE_DEPTH);
+    let (abort_tx, abort_rx) = oneshot::channel();
+    let (asr_tx, mut asr_rx) = mpsc::channel::<AsrEvent>(ASR_EVENT_QUEUE_DEPTH);
 
     tokio::spawn(async move {
         let asr_item_id = item_id.clone();
-        let mut asr_task =
-            tokio::spawn(async move { transcribe_pcm_channel(&credentials, pcm_rx, asr_tx).await });
+        let mut asr_task = tokio::spawn(async move {
+            transcribe_pcm_channel(&credentials, pcm_rx, asr_tx, abort_rx).await
+        });
         let mut sent_finished = false;
 
         loop {
@@ -488,7 +542,7 @@ fn spawn_turn_for_item(
         }
     });
 
-    pcm_tx
+    TurnInputHandle::new(pcm_tx, abort_tx)
 }
 
 async fn send_turn_finished(
@@ -515,7 +569,7 @@ async fn handle_realtime_socket(
     runtime_config: Arc<RuntimeConfig>,
 ) -> Result<()> {
     let (mut write, mut read) = ws.split();
-    let (turn_output_tx, mut turn_output_rx) = mpsc::channel::<TurnOutput>(256);
+    let (turn_output_tx, mut turn_output_rx) = mpsc::channel::<TurnOutput>(TURN_OUTPUT_QUEUE_DEPTH);
     let mut active_turn = ActiveTurn::new_idle();
     let mut session = RealtimeSession::new(runtime_config.model.clone());
     let mut converter = Pcm16Converter::new(session.input_sample_rate);
@@ -526,7 +580,7 @@ async fn handle_realtime_socket(
         tokio::select! {
             maybe_message = read.next() => {
                 let Some(message) = maybe_message else {
-                    active_turn.close_input();
+                    active_turn.abort_input();
                     break;
                 };
                 match decode_socket_message(message?) {
@@ -551,7 +605,7 @@ async fn handle_realtime_socket(
                         }
                     }
                     Ok(SocketMessage::Close) => {
-                        active_turn.close_input();
+                        active_turn.abort_input();
                         break;
                     }
                     Err(error) => {
@@ -602,7 +656,7 @@ async fn handle_realtime_socket(
                                 active_turn = ActiveTurn::new_idle();
                             }
                             AsrEvent::Error(message) => {
-                                send_json(&mut write, error_event(message)).await?;
+                                send_json(&mut write, backend_error_event(message)).await?;
                                 active_turn = ActiveTurn::new_idle();
                             }
                             _ => {}
@@ -626,7 +680,7 @@ async fn handle_realtime_socket(
                                 active_turn = ActiveTurn::new_idle();
                             }
                             Err(message) => {
-                                send_json(&mut write, error_event(message)).await?;
+                                send_json(&mut write, backend_error_event(message)).await?;
                                 active_turn = ActiveTurn::new_idle();
                             }
                         }
@@ -684,7 +738,7 @@ async fn handle_client_event(raw: &str, context: ClientEventContext<'_>) -> Resu
             send_json(write, input_audio_committed_event(&active_turn.item_id)).await?;
         }
         ClientEvent::Close => {
-            active_turn.close_input();
+            active_turn.abort_input();
         }
     }
 
@@ -751,6 +805,10 @@ fn unauthorized_response(error: anyhow::Error) -> ErrorResponse {
     error_response(StatusCode::UNAUTHORIZED, error)
 }
 
+fn forbidden_response(error: anyhow::Error) -> ErrorResponse {
+    error_response(StatusCode::FORBIDDEN, error)
+}
+
 fn error_response(status: StatusCode, error: anyhow::Error) -> ErrorResponse {
     Response::builder()
         .status(status)
@@ -780,6 +838,34 @@ fn validate_api_key(
     }
 
     Err(anyhow!("missing or invalid API key"))
+}
+
+fn validate_browser_origin(origin: Option<&str>, expected_api_key: Option<&str>) -> Result<()> {
+    if expected_api_key.is_some() || origin.is_none() {
+        return Ok(());
+    }
+
+    let origin = origin.unwrap_or_default();
+    if local_origin_host(origin).is_some_and(is_local_origin_host) {
+        return Ok(());
+    }
+
+    Err(anyhow!("origin is not allowed without API key"))
+}
+
+fn local_origin_host(origin: &str) -> Option<&str> {
+    let remainder = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))?;
+    let authority = remainder.split('/').next().unwrap_or(remainder);
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest.split_once(']').map(|(host, _)| host);
+    }
+    Some(authority.split(':').next().unwrap_or(authority))
+}
+
+fn is_local_origin_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
 }
 
 #[cfg(test)]
@@ -872,6 +958,7 @@ fn even_pcm_bytes(pcm16: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::path::PathBuf;
 
     use crate::config::ServerConfig;
     use crate::realtime::{decode_client_event, RealtimeSession, SessionUpdateConfig};
@@ -884,7 +971,8 @@ mod tests {
         client_action_for_event, decode_socket_message, encode_query_component,
         is_websocket_upgrade_header, reset_audio_buffer_converter, selected_realtime_subprotocol,
         validate_api_key, validate_realtime_request, validate_session_update_timing, ActiveTurn,
-        ClientAction, Pcm16Converter, RuntimeConfig, SocketMessage, TurnInput, TurnTranscriptState,
+        ClientAction, Pcm16Converter, RuntimeConfig, SocketMessage, TurnInput, TurnInputHandle,
+        TurnTranscriptState,
     };
 
     #[test]
@@ -1029,6 +1117,35 @@ mod tests {
         assert_ne!(turn.item_id, old_item_id);
         assert!(matches!(turn.input, TurnInput::Idle));
         assert!(pcm_rx.is_closed());
+    }
+
+    #[test]
+    fn active_turn_clear_aborts_open_turn() {
+        let mut turn = ActiveTurn::new_idle();
+        let (pcm_tx, _pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+        let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel();
+
+        turn.ensure_started_with(|_| TurnInputHandle::new(pcm_tx, abort_tx))
+            .expect("open input");
+        turn.replace_with_idle();
+
+        assert!(abort_rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn active_turn_commit_closes_without_abort_signal() {
+        let mut turn = ActiveTurn::new_idle();
+        let (pcm_tx, _pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+        let (abort_tx, mut abort_rx) = tokio::sync::oneshot::channel();
+
+        turn.ensure_started_with(|_| TurnInputHandle::new(pcm_tx, abort_tx))
+            .expect("open input");
+        turn.close_input();
+
+        assert!(matches!(
+            abort_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
     }
 
     #[test]
@@ -1292,6 +1409,46 @@ mod tests {
     }
 
     #[test]
+    fn disabled_auth_rejects_non_local_browser_origin() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: None,
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=seed-asr")
+            .header("origin", "https://example.com")
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        let error = validate_realtime_request(&request, response, &runtime)
+            .expect_err("external origin should fail without auth");
+
+        assert_eq!(error.status(), StatusCode::FORBIDDEN);
+        assert!(error
+            .body()
+            .as_deref()
+            .is_some_and(|body| body.contains("origin is not allowed")));
+    }
+
+    #[test]
+    fn disabled_auth_allows_local_browser_origin() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: None,
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=seed-asr")
+            .header("origin", "http://127.0.0.1:8000")
+            .header("sec-websocket-protocol", "realtime")
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        validate_realtime_request(&request, response, &runtime).expect("local origin");
+    }
+
+    #[test]
     fn realtime_request_rejects_wrong_model_before_auth_echo() {
         let runtime = RuntimeConfig {
             model: "seed-asr".to_string(),
@@ -1330,14 +1487,19 @@ mod tests {
             model: "custom/asr".to_string(),
             api_key: Some("local-secret".to_string()),
         });
-        let lines =
-            runtime.startup_lines(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000), true);
+        let credentials_path = PathBuf::from("/tmp/seedrelay-credentials.json");
+        let lines = runtime.startup_lines(
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
+            true,
+            &credentials_path,
+        );
 
         assert_eq!(lines[0], "SeedRelay ready");
         assert!(lines.contains(
             &"  Realtime  ws://127.0.0.1:8000/v1/realtime?model=custom%2Fasr".to_string()
         ));
         assert!(lines.contains(&"  Auth      API key required".to_string()));
+        assert!(lines.contains(&"  Credentials /tmp/seedrelay-credentials.json".to_string()));
         assert!(lines.contains(&"  Web UI    http://127.0.0.1:8000/".to_string()));
         assert!(!lines.join("\n").contains("local-secret"));
     }
@@ -1349,14 +1511,17 @@ mod tests {
             model: "seed-asr".to_string(),
             api_key: None,
         });
+        let credentials_path = PathBuf::from(".seedrelay/credentials.json");
         let lines = runtime.startup_lines(
             SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
             false,
+            &credentials_path,
         );
 
         assert!(lines
             .contains(&"  Realtime  ws://127.0.0.1:8000/v1/realtime?model=seed-asr".to_string()));
         assert!(lines.contains(&"  Auth      disabled".to_string()));
+        assert!(lines.contains(&"  Credentials .seedrelay/credentials.json".to_string()));
         assert!(lines.contains(&"  Web UI    disabled".to_string()));
         assert!(!lines.iter().any(|line| line.contains("Debug")));
     }

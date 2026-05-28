@@ -6,7 +6,7 @@ fn resolve_server_config_uses_defaults() {
         .expect("resolve config");
 
     assert_eq!(config.bind.port(), DEFAULT_PORT);
-    assert_eq!(config.bind.ip().to_string(), "0.0.0.0");
+    assert_eq!(config.bind.ip().to_string(), "127.0.0.1");
     assert_eq!(config.model, DEFAULT_MODEL);
     assert_eq!(config.api_key, None);
 }
@@ -17,6 +17,28 @@ fn resolve_server_config_uses_custom_host_and_port() {
         resolve_server_config("127.0.0.1", 9000, DEFAULT_MODEL, None).expect("resolve config");
 
     assert_eq!(config.bind.to_string(), "127.0.0.1:9000");
+}
+
+#[test]
+fn resolve_server_config_rejects_public_bind_without_api_key() {
+    let error = resolve_server_config("0.0.0.0", DEFAULT_PORT, DEFAULT_MODEL, None)
+        .expect_err("public bind without auth");
+
+    assert!(error.to_string().contains("public bind requires --api-key"));
+}
+
+#[test]
+fn resolve_server_config_allows_public_bind_with_api_key() {
+    let config = resolve_server_config(
+        "0.0.0.0",
+        DEFAULT_PORT,
+        DEFAULT_MODEL,
+        Some("local-secret".into()),
+    )
+    .expect("public bind with auth");
+
+    assert_eq!(config.bind.ip().to_string(), "0.0.0.0");
+    assert_eq!(config.api_key.as_deref(), Some("local-secret"));
 }
 
 #[test]
