@@ -59,23 +59,24 @@ cargo build --release
 # 启动并开启 Web UI
 ./target/release/seedrelay --webui
 
-# 自定义地址和端口
-./target/release/seedrelay --host 0.0.0.0 --port 8080
+# 自定义本机地址和端口
+./target/release/seedrelay --host 127.0.0.1 --port 8080
 
-# 设置 API Key
-./target/release/seedrelay --api-key your-secret-key --webui
+# 暴露到 localhost 以外时必须设置 API Key
+./target/release/seedrelay --host 0.0.0.0 --api-key your-secret-key --webui
 ```
 
-首次运行会自动注册设备并获取凭证，保存到当前工作目录下的 `.seedrelay/credentials.json`。如果通过容器或服务管理器运行，请持久化这个目录。
+首次运行会自动注册设备并获取凭证，保存到当前工作目录下的 `.seedrelay/credentials.json`；如果文件不存在，SeedRelay 会重新注册。
 
 ## 命令行参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `--host <ADDR>` | `0.0.0.0` | 服务器监听地址 |
+| `--host <ADDR>` | `127.0.0.1` | 服务器监听地址；非 loopback 地址必须配置 `--api-key` |
 | `--port <PORT>` | `8000` | 服务器监听端口 |
 | `--model <MODEL>` | `seed-asr` | ASR 模型标识 |
 | `--api-key <KEY>` | *(未启用)* | 客户端需提供的 API Key |
+| `--credentials-path <PATH>` | `.seedrelay/credentials.json` | 设备凭证缓存路径 |
 | `--webui` | 关闭 | 启用内置 Web 测试界面 |
 | `--reset` | 关闭 | 重置设备凭证并重新注册 |
 
@@ -85,7 +86,7 @@ cargo build --release
 docker compose up -d
 ```
 
-通过 `compose.yml` 的 `command:` 字段自定义参数。
+Docker 镜像和 `compose.yml` 都会监听 `0.0.0.0`，并默认使用示例 key `your-secret-key`，因此不需要额外环境变量即可启动；如果要暴露到可信本地网络以外，请先改掉这个值。可通过 `compose.yml` 的 `command:` 字段继续自定义参数。
 
 ## API
 
@@ -110,7 +111,9 @@ SeedRelay 实现的是 OpenAI Realtime transcription 这一块，用来接入实
 - `conversation.item.input_audio_transcription.delta`
 - `conversation.item.input_audio_transcription.completed`
 
-SeedRelay 不实现 chat completions、文本生成、Responses API、文件上传转写、embeddings、assistants、batches、fine-tuning 等接口。
+SeedRelay 会为了兼容客户端接受 `audio.input.transcription.delay` 和 `include: ["item.input_audio_transcription.logprobs"]`，但 Seed-ASR 没有对应的延迟调节或 logprobs 输出，因此这些字段会作为 no-op 处理。每个 `input_audio_buffer.append` 的解码后 PCM 数据上限为 512 KiB，用于控制实时资源占用；连续音频请拆成更小的分片发送。
+
+SeedRelay 不实现 chat completions、文本生成、Responses API、文件上传转写、embeddings、assistants、batches、fine-tuning、助手音频生成、工具调用或完整的 Realtime conversation 生命周期。
 
 ### 客户端事件
 

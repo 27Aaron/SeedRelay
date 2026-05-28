@@ -59,23 +59,24 @@ cargo build --release
 # Start with web UI
 ./target/release/seedrelay --webui
 
-# Custom host and port
-./target/release/seedrelay --host 0.0.0.0 --port 8080
+# Custom host and port for local access
+./target/release/seedrelay --host 127.0.0.1 --port 8080
 
-# With API key
-./target/release/seedrelay --api-key your-secret-key --webui
+# Expose beyond localhost with API key
+./target/release/seedrelay --host 0.0.0.0 --api-key your-secret-key --webui
 ```
 
-First run will automatically register a device and obtain credentials. These are saved to `.seedrelay/credentials.json` in the current working directory, so keep that directory persistent if you run SeedRelay from a container or a service manager.
+First run will automatically register a device and obtain credentials. These are saved to `.seedrelay/credentials.json` in the current working directory; if the file is missing, SeedRelay will register again.
 
 ## CLI Reference
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--host <ADDR>` | `0.0.0.0` | Server listen address |
+| `--host <ADDR>` | `127.0.0.1` | Server listen address; non-loopback addresses require `--api-key` |
 | `--port <PORT>` | `8000` | Server listen port |
 | `--model <MODEL>` | `seed-asr` | ASR model identifier |
 | `--api-key <KEY>` | *(disabled)* | Require this API key from clients |
+| `--credentials-path <PATH>` | `.seedrelay/credentials.json` | Device credential cache path |
 | `--webui` | off | Enable built-in web testing UI |
 | `--reset` | off | Reset device credentials and re-register |
 
@@ -85,7 +86,7 @@ First run will automatically register a device and obtain credentials. These are
 docker compose up -d
 ```
 
-Customize via `command:` in `compose.yml`.
+The Docker image and `compose.yml` bind to `0.0.0.0` with the sample key `your-secret-key`, so they start without extra environment setup; change that value before exposing it beyond a trusted local network. Customize via `command:` in `compose.yml`.
 
 ## API
 
@@ -110,7 +111,9 @@ SeedRelay implements the OpenAI Realtime transcription surface for live speech-t
 - `conversation.item.input_audio_transcription.delta`
 - `conversation.item.input_audio_transcription.completed`
 
-SeedRelay does not implement chat completions, text generation, Responses API, file upload transcription, embeddings, assistants, batches, or fine-tuning endpoints.
+SeedRelay accepts `audio.input.transcription.delay` and `include: ["item.input_audio_transcription.logprobs"]` for compatibility, but Seed-ASR does not expose matching delay tuning or logprobs, so those fields are treated as no-ops. Each `input_audio_buffer.append` payload is capped at 512 KiB of decoded PCM bytes for realtime resource safety; send continuous audio as smaller chunks.
+
+SeedRelay does not implement chat completions, text generation, Responses API, file upload transcription, embeddings, assistants, batches, fine-tuning endpoints, generated assistant audio, tools, or the full Realtime conversation lifecycle.
 
 ### Client Events
 
