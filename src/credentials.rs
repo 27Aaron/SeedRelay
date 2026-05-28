@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -277,6 +276,7 @@ async fn fetch_asr_token(client: &reqwest::Client, device_id: &str, cdid: &str) 
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     #[cfg(unix)]
     {
+        use std::io::Write as _;
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
         let mut file = fs::OpenOptions::new()
