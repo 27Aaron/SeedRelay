@@ -1,8 +1,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use seedrelay::config::DEFAULT_MODEL;
 use seedrelay::realtime::{
-    decode_client_event, error_event, model_list_response, model_not_found_error,
-    model_object_response, session_created_event, session_updated_event,
+    backend_error_event, decode_client_event, error_event, model_list_response,
+    model_not_found_error, model_object_response, session_created_event, session_updated_event,
     transcript_completed_event, transcript_delta_event, validate_realtime_target, ClientEvent,
     RealtimeSession, SessionUpdateConfig,
 };
@@ -33,7 +33,7 @@ fn decodes_append_event_audio_payload() {
 
 #[test]
 fn decodes_session_prefixed_audio_buffer_aliases() {
-    let audio = STANDARD.encode([9u8, 8, 7]);
+    let audio = STANDARD.encode([9u8, 8, 7, 6]);
     let append = decode_client_event(&format!(
         r#"{{"type":"session.input_audio_buffer.append","audio":"{audio}"}}"#
     ))
@@ -43,7 +43,7 @@ fn decodes_session_prefixed_audio_buffer_aliases() {
     let clear =
         decode_client_event(r#"{"type":"session.input_audio_buffer.clear"}"#).expect("clear");
 
-    assert_eq!(append, ClientEvent::AppendAudio(vec![9, 8, 7]));
+    assert_eq!(append, ClientEvent::AppendAudio(vec![9, 8, 7, 6]));
     assert_eq!(commit, ClientEvent::Commit);
     assert_eq!(clear, ClientEvent::Clear);
 }
@@ -103,6 +103,14 @@ fn rejects_append_events_without_valid_audio() {
             "expected {expected:?} in {error}"
         );
     }
+}
+
+#[test]
+fn rejects_append_events_with_partial_pcm_sample() {
+    let error = decode_client_event(r#"{"type":"input_audio_buffer.append","audio":"AA=="}"#)
+        .expect_err("odd byte PCM should fail");
+
+    assert!(error.to_string().contains("whole PCM16 samples"));
 }
 
 #[test]
@@ -301,11 +309,32 @@ fn rejected_session_update_does_not_mutate_session() {
         transcription_model: Some("seed-asr".into()),
         language: Some("zh".into()),
         delay: None,
-        include: vec!["item.input_audio_transcription.logprobs".into()],
+        include: vec!["unsupported.field".into()],
     };
 
     assert!(update.apply_to(&mut session, "seed-asr").is_err());
     assert_eq!(session, original);
+}
+
+#[test]
+fn accepts_compatible_optional_transcription_fields_as_noop() {
+    let mut session = RealtimeSession::with_id("sess_test", "seed-asr");
+    session.language = Some("en".into());
+    let update = SessionUpdateConfig {
+        input_sample_rate: None,
+        input_audio_format_type: None,
+        transcription_model: None,
+        language: None,
+        delay: Some("low".into()),
+        include: vec!["item.input_audio_transcription.logprobs".into()],
+    };
+
+    let rate_changed = update
+        .apply_to(&mut session, "seed-asr")
+        .expect("compatible optional fields");
+
+    assert!(!rate_changed);
+    assert_eq!(session.language.as_deref(), Some("en"));
 }
 
 #[test]
@@ -363,7 +392,7 @@ fn rejects_unsupported_session_update_apply_fields_without_mutation() {
                 transcription_model: None,
                 language: None,
                 delay: None,
-                include: vec!["item.input_audio_transcription.logprobs".into()],
+                include: vec!["unsupported.field".into()],
             },
             "session.include",
         ),
@@ -526,4 +555,14 @@ fn renders_error_events_with_openai_style_fields() {
     assert_eq!(event["error"]["type"], "invalid_request_error");
     assert_eq!(event["error"]["code"], "invalid_request");
     assert_eq!(event["error"]["message"], "bad audio");
+}
+
+#[test]
+fn renders_backend_error_events_with_backend_code() {
+    let event = backend_error_event("service discovery failure");
+
+    assert_eq!(event["type"], "error");
+    assert_eq!(event["error"]["type"], "server_error");
+    assert_eq!(event["error"]["code"], "backend_error");
+    assert_eq!(event["error"]["message"], "service discovery failure");
 }

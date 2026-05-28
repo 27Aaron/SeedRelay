@@ -12,6 +12,7 @@ pub const MAX_INPUT_SAMPLE_RATE: u32 = 96_000;
 const MAX_CLIENT_EVENT_BYTES: usize = 768 * 1024;
 const MAX_APPEND_AUDIO_BYTES: usize = 512 * 1024;
 const MAX_APPEND_AUDIO_BASE64_BYTES: usize = MAX_APPEND_AUDIO_BYTES.div_ceil(3) * 4;
+const LOGPROBS_INCLUDE: &str = "item.input_audio_transcription.logprobs";
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ClientEvent {
@@ -72,6 +73,9 @@ pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
                 .map_err(|error| anyhow!("invalid base64 audio: {error}"))?;
             if bytes.len() > MAX_APPEND_AUDIO_BYTES {
                 return Err(anyhow!("audio payload too large"));
+            }
+            if bytes.len() % 2 != 0 {
+                return Err(anyhow!("audio payload must contain whole PCM16 samples"));
             }
             Ok(ClientEvent::AppendAudio(bytes))
         }
@@ -244,12 +248,21 @@ impl SessionUpdateConfig {
             }
         }
 
-        if !self.include.is_empty() {
-            return Err(anyhow!("session.include is not supported by SeedRelay"));
+        if let Some(include) = self
+            .include
+            .iter()
+            .find(|include| include.as_str() != LOGPROBS_INCLUDE)
+        {
+            return Err(anyhow!("session.include value is not supported: {include}"));
         }
 
-        if self.delay.is_some() {
-            return Err(anyhow!("transcription delay is not supported by SeedRelay"));
+        if let Some(delay) = &self.delay {
+            if !matches!(
+                delay.as_str(),
+                "minimal" | "low" | "medium" | "high" | "xhigh"
+            ) {
+                return Err(anyhow!("unsupported transcription delay: {delay}"));
+            }
         }
 
         if let Some(format_type) = &self.input_audio_format_type {
@@ -323,12 +336,24 @@ fn session_json(session: &RealtimeSession) -> Value {
 }
 
 pub fn error_event(message: impl Into<String>) -> Value {
+    error_event_with_kind("invalid_request_error", "invalid_request", message)
+}
+
+pub fn backend_error_event(message: impl Into<String>) -> Value {
+    error_event_with_kind("server_error", "backend_error", message)
+}
+
+fn error_event_with_kind(
+    error_type: &'static str,
+    code: &'static str,
+    message: impl Into<String>,
+) -> Value {
     json!({
         "type": "error",
         "event_id": event_id(),
         "error": {
-            "type": "invalid_request_error",
-            "code": "invalid_request",
+            "type": error_type,
+            "code": code,
             "message": message.into(),
         }
     })
