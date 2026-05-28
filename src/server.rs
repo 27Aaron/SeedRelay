@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::stream::SplitSink;
@@ -9,10 +10,12 @@ use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
+use tokio_tungstenite::{accept_hdr_async_with_config, WebSocketStream};
 use uuid::Uuid;
 
 use crate::audio::LinearPcmResampler;
@@ -26,6 +29,9 @@ use crate::realtime::{
 };
 use crate::response::AsrEvent;
 use crate::web::{http_response_with_config, WebRuntimeConfig};
+
+const IO_TIMEOUT_SECS: u64 = 10;
+const WS_MAX_MESSAGE_BYTES: usize = 768 * 1024;
 
 #[derive(Debug, Clone)]
 struct RuntimeConfig {
@@ -256,7 +262,14 @@ async fn handle_connection(
     runtime_config: Arc<RuntimeConfig>,
     web_enabled: bool,
 ) -> Result<()> {
-    if !is_websocket_upgrade(&stream).await? {
+    let is_upgrade = timeout(
+        Duration::from_secs(IO_TIMEOUT_SECS),
+        is_websocket_upgrade(&stream),
+    )
+    .await
+    .context("timed out reading HTTP header")??;
+
+    if !is_upgrade {
         return serve_http_connection(stream, runtime_config.as_ref(), web_enabled).await;
     }
 
@@ -266,9 +279,13 @@ async fn handle_connection(
           -> std::result::Result<Response, ErrorResponse> {
         validate_realtime_request(request, response, handshake_config.as_ref())
     };
-    let ws = accept_hdr_async(stream, callback)
-        .await
-        .context("websocket handshake failed")?;
+    let ws = timeout(
+        Duration::from_secs(IO_TIMEOUT_SECS),
+        accept_hdr_async_with_config(stream, callback, Some(websocket_config())),
+    )
+    .await
+    .context("websocket handshake timed out")?
+    .context("websocket handshake failed")?;
 
     handle_realtime_socket(ws, credentials.as_ref().clone(), runtime_config).await
 }
@@ -316,8 +333,26 @@ fn validate_realtime_request(
 async fn is_websocket_upgrade(stream: &TcpStream) -> Result<bool> {
     let mut buffer = [0u8; 1024];
     let read = stream.peek(&mut buffer).await?;
-    let header = String::from_utf8_lossy(&buffer[..read]).to_ascii_lowercase();
-    Ok(header.contains("\r\nupgrade: websocket") || header.contains("\nupgrade: websocket"))
+    let header = String::from_utf8_lossy(&buffer[..read]);
+    Ok(is_websocket_upgrade_header(&header))
+}
+
+fn is_websocket_upgrade_header(header: &str) -> bool {
+    header
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .any(|(name, value)| {
+            name.trim().eq_ignore_ascii_case("upgrade")
+                && value
+                    .split(',')
+                    .any(|value| value.trim().eq_ignore_ascii_case("websocket"))
+        })
+}
+
+fn websocket_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_message_size(Some(WS_MAX_MESSAGE_BYTES))
+        .max_frame_size(Some(WS_MAX_MESSAGE_BYTES))
 }
 
 async fn serve_http_connection(
@@ -325,7 +360,12 @@ async fn serve_http_connection(
     runtime_config: &RuntimeConfig,
     web_enabled: bool,
 ) -> Result<()> {
-    let request = read_http_header(&mut stream).await?;
+    let request = timeout(
+        Duration::from_secs(IO_TIMEOUT_SECS),
+        read_http_header(&mut stream),
+    )
+    .await
+    .context("timed out reading HTTP header")??;
     let first_line = request
         .lines()
         .next()
@@ -794,9 +834,9 @@ mod tests {
 
     use super::{
         client_action_for_event, decode_socket_message, encode_query_component,
-        reset_audio_buffer_converter, selected_realtime_subprotocol, validate_api_key,
-        validate_realtime_request, validate_session_update_timing, ActiveTurn, ClientAction,
-        Pcm16Converter, RuntimeConfig, SocketMessage, TurnInput, TurnTranscriptState,
+        is_websocket_upgrade_header, reset_audio_buffer_converter, selected_realtime_subprotocol,
+        validate_api_key, validate_realtime_request, validate_session_update_timing, ActiveTurn,
+        ClientAction, Pcm16Converter, RuntimeConfig, SocketMessage, TurnInput, TurnTranscriptState,
     };
 
     #[test]
@@ -938,6 +978,13 @@ mod tests {
 
         assert!(matches!(text, SocketMessage::ClientEvent(raw) if raw.contains("commit")));
         assert!(matches!(binary, SocketMessage::ClientEvent(raw) if raw.contains("clear")));
+    }
+
+    #[test]
+    fn websocket_upgrade_header_accepts_compact_spacing() {
+        let header = "GET /v1/realtime?model=seed-asr HTTP/1.1\r\nHost: localhost\r\nUpgrade:websocket\r\nConnection: Upgrade\r\n\r\n";
+
+        assert!(is_websocket_upgrade_header(header));
     }
 
     #[test]
