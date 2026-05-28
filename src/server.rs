@@ -290,20 +290,20 @@ fn validate_realtime_request(
         .and_then(|value| value.to_str().ok());
     validate_api_key(authorization, protocols, runtime_config.api_key.as_deref())
         .map_err(unauthorized_response)?;
-    if let Some(expected_api_key) = runtime_config.api_key.as_deref() {
-        if let Some(protocol) = matching_realtime_subprotocol(protocols, expected_api_key) {
-            let mut response = response;
-            response.headers_mut().insert(
-                "sec-websocket-protocol",
-                HeaderValue::from_str(protocol).map_err(|error| {
-                    error_response(
-                        StatusCode::BAD_REQUEST,
-                        anyhow!("invalid websocket subprotocol: {error}"),
-                    )
-                })?,
-            );
-            return Ok(response);
-        }
+    if let Some(protocol) =
+        response_realtime_subprotocol(protocols, runtime_config.api_key.as_deref())
+    {
+        let mut response = response;
+        response.headers_mut().insert(
+            "sec-websocket-protocol",
+            HeaderValue::from_str(protocol).map_err(|error| {
+                error_response(
+                    StatusCode::BAD_REQUEST,
+                    anyhow!("invalid websocket subprotocol: {error}"),
+                )
+            })?,
+        );
+        return Ok(response);
     }
     Ok(response)
 }
@@ -681,6 +681,22 @@ fn matching_realtime_subprotocol<'a>(
     })
 }
 
+fn matching_realtime_protocol(protocols: Option<&str>) -> Option<&str> {
+    protocols?
+        .split(',')
+        .map(str::trim)
+        .find(|protocol| protocol.eq_ignore_ascii_case("realtime"))
+}
+
+fn response_realtime_subprotocol<'a>(
+    protocols: Option<&'a str>,
+    expected_api_key: Option<&str>,
+) -> Option<&'a str> {
+    matching_realtime_protocol(protocols).or_else(|| {
+        expected_api_key.and_then(|api_key| matching_realtime_subprotocol(protocols, api_key))
+    })
+}
+
 fn encode_query_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -983,11 +999,17 @@ mod tests {
         let response =
             validate_realtime_request(&request, response, &runtime).expect("valid request");
 
-        assert_eq!(response.headers().get("sec-websocket-protocol"), None);
+        assert_eq!(
+            response
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|value| value.to_str().ok()),
+            Some("realtime")
+        );
     }
 
     #[test]
-    fn handshake_echoes_matching_later_subprotocol() {
+    fn handshake_echoes_realtime_subprotocol_after_subprotocol_auth() {
         let runtime = RuntimeConfig {
             model: "seed-asr".to_string(),
             api_key: Some("local-secret".to_string()),
@@ -1010,12 +1032,12 @@ mod tests {
                 .headers()
                 .get("sec-websocket-protocol")
                 .and_then(|value| value.to_str().ok()),
-            Some("openai-insecure-api-key.local-secret")
+            Some("realtime")
         );
     }
 
     #[test]
-    fn disabled_auth_does_not_echo_credential_subprotocol() {
+    fn disabled_auth_echoes_realtime_without_echoing_credential_subprotocol() {
         let runtime = RuntimeConfig {
             model: "seed-asr".to_string(),
             api_key: None,
@@ -1025,6 +1047,34 @@ mod tests {
             .header(
                 "sec-websocket-protocol",
                 "realtime, openai-insecure-api-key.local-secret",
+            )
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        let response =
+            validate_realtime_request(&request, response, &runtime).expect("valid request");
+
+        assert_eq!(
+            response
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|value| value.to_str().ok()),
+            Some("realtime")
+        );
+    }
+
+    #[test]
+    fn disabled_auth_does_not_echo_credential_subprotocol_without_realtime() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: None,
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=seed-asr")
+            .header(
+                "sec-websocket-protocol",
+                "openai-insecure-api-key.local-secret",
             )
             .body(())
             .expect("request");
