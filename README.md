@@ -86,7 +86,7 @@ First run will automatically register a device and obtain credentials. These are
 docker compose up -d
 ```
 
-The Docker image and `compose.yml` bind to `0.0.0.0` with the sample key `your-secret-key`, so they start without extra environment setup; change that value before exposing it beyond a trusted local network. Customize via `command:` in `compose.yml`.
+The Docker image binds to `0.0.0.0`. The sample `compose.yml` adds the API key `your-secret-key` so it starts without extra environment setup; change that value before exposing it beyond a trusted local network. Customize via `command:` in `compose.yml`.
 
 ## API
 

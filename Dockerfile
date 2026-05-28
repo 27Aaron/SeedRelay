@@ -4,4 +4,4 @@ COPY seedrelay /app/seedrelay
 WORKDIR /app
 RUN chmod +x /app/seedrelay
 EXPOSE 8000
-CMD ["./seedrelay", "--host", "0.0.0.0", "--api-key", "your-secret-key"]
+CMD ["./seedrelay", "--host", "0.0.0.0"]

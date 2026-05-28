@@ -86,7 +86,7 @@ cargo build --release
 docker compose up -d
 ```
 
-Docker 镜像和 `compose.yml` 都会监听 `0.0.0.0`，并默认使用示例 key `your-secret-key`，因此不需要额外环境变量即可启动；如果要暴露到可信本地网络以外，请先改掉这个值。可通过 `compose.yml` 的 `command:` 字段继续自定义参数。
+Docker 镜像会监听 `0.0.0.0`。示例 `compose.yml` 会额外配置 API key `your-secret-key`，因此不需要额外环境变量即可启动；如果要暴露到可信本地网络以外，请先改掉这个值。可通过 `compose.yml` 的 `command:` 字段继续自定义参数。
 
 ## API
 

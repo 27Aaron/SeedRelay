@@ -4,7 +4,8 @@ const COMPOSE_YML: &str = include_str!("../compose.yml");
 #[test]
 fn docker_image_listens_on_all_interfaces_by_default() {
     assert!(DOCKERFILE.contains(r#""--host", "0.0.0.0""#));
-    assert!(DOCKERFILE.contains(r#""--api-key", "your-secret-key""#));
+    assert!(!DOCKERFILE.contains("--api-key"));
+    assert!(!DOCKERFILE.contains("your-secret-key"));
 }
 
 #[test]
