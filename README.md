@@ -15,7 +15,7 @@ SeedRelay is a lightweight local server that exposes an OpenAI Realtime API endp
 - **Streaming Transcription** — Real-time interim results and final transcripts
 - **Audio Processing** — Automatic sample rate conversion and Opus encoding
 - **Built-in Web UI** — Live testing interface with audio visualization (`--webui`)
-- **API Key Auth** — Optional `api_key` parameter enforcement
+- **API Key Auth** — Optional Bearer token, `api_key` query string, or WebSocket subprotocol enforcement
 - **Zero-config Credentials** — Automatic device registration and token management
 
 ## Architecture
@@ -25,7 +25,7 @@ Client (OpenAI Realtime API)
   │  WebSocket /v1/realtime
   ▼
 SeedRelay
-  ├── JSON event parsing (session.update, audio.append, commit)
+  ├── JSON event parsing (session.update, input_audio_buffer.append, input_audio_buffer.commit)
   ├── PCM16 resampling → Opus encoding
   ├── Protobuf message construction
   ▼
@@ -95,6 +95,23 @@ Customize via `command:` in `compose.yaml`.
 ws://127.0.0.1:8000/v1/realtime?model=seed-asr[&api_key=...]
 ```
 
+### OpenAI Compatibility Scope
+
+SeedRelay implements the OpenAI Realtime transcription surface for live speech-to-text clients:
+
+- `GET /v1/models`
+- `GET /v1/models/{model}`
+- `WS /v1/realtime?model=seed-asr`
+- `Authorization: Bearer <api-key>`, `api_key` query string, and `openai-insecure-api-key.<api-key>` WebSocket subprotocol auth
+- `session.update`
+- `input_audio_buffer.append`
+- `input_audio_buffer.commit`
+- `input_audio_buffer.clear`
+- `conversation.item.input_audio_transcription.delta`
+- `conversation.item.input_audio_transcription.completed`
+
+SeedRelay does not implement chat completions, text generation, Responses API, file upload transcription, embeddings, assistants, batches, or fine-tuning endpoints.
+
 ### Client Events
 
 | Event | Description |
@@ -102,18 +119,20 @@ ws://127.0.0.1:8000/v1/realtime?model=seed-asr[&api_key=...]
 | `session.update` | Configure session (e.g. `input_audio_format`, `input_sample_rate`) |
 | `input_audio_buffer.append` | Send base64-encoded PCM16 audio chunk |
 | `input_audio_buffer.commit` | Signal end of audio, start transcription |
+| `input_audio_buffer.clear` | Clear buffered audio |
 | `session.close` | Close the session |
 
 ### Server Events
 
-| Event | Description |
-|-------|-------------|
+| Server Event | Description |
+| --- | --- |
 | `session.created` | Session established with model info |
-| `session.updated` | Session configuration confirmed |
-| `input_audio_buffer.committed` | Audio buffer committed for processing |
-| `conversation.item.input_audio_transcript.delta` | Interim transcript fragment |
-| `conversation.item.input_audio_transcript.completed` | Final transcript |
-| `error` | Error message |
+| `session.updated` | Session configuration confirmed after `session.update` |
+| `input_audio_buffer.committed` | Audio buffer committed for transcription |
+| `input_audio_buffer.cleared` | Audio buffer cleared |
+| `conversation.item.input_audio_transcription.delta` | Interim transcript fragment |
+| `conversation.item.input_audio_transcription.completed` | Final transcript |
+| `error` | OpenAI-style protocol or backend error |
 
 ## Tech Stack
 
