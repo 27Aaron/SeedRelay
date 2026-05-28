@@ -10,7 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
-use tokio_tungstenite::tungstenite::http::StatusCode;
+use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{accept_hdr_async, WebSocketStream};
 use uuid::Uuid;
@@ -163,8 +163,32 @@ fn validate_realtime_request(
         .headers()
         .get("authorization")
         .and_then(|value| value.to_str().ok());
-    validate_api_key(authorization, target, runtime_config.api_key.as_deref())
-        .map_err(unauthorized_response)?;
+    let protocols = request
+        .headers()
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok());
+    validate_api_key(
+        authorization,
+        protocols,
+        target,
+        runtime_config.api_key.as_deref(),
+    )
+    .map_err(unauthorized_response)?;
+    if let Some(expected_api_key) = runtime_config.api_key.as_deref() {
+        if let Some(protocol) = matching_realtime_subprotocol(protocols, expected_api_key) {
+            let mut response = response;
+            response.headers_mut().insert(
+                "sec-websocket-protocol",
+                HeaderValue::from_str(protocol).map_err(|error| {
+                    error_response(
+                        StatusCode::BAD_REQUEST,
+                        anyhow!("invalid websocket subprotocol: {error}"),
+                    )
+                })?,
+            );
+            return Ok(response);
+        }
+    }
     Ok(response)
 }
 
@@ -422,6 +446,7 @@ fn error_response(status: StatusCode, error: anyhow::Error) -> ErrorResponse {
 
 fn validate_api_key(
     authorization: Option<&str>,
+    protocols: Option<&str>,
     target: &str,
     expected_api_key: Option<&str>,
 ) -> Result<()> {
@@ -431,17 +456,37 @@ fn validate_api_key(
 
     let bearer_matches = authorization
         .and_then(|value| value.trim().split_once(' '))
-        .map(|(scheme, token)| {
+        .filter(|(scheme, token)| {
             scheme.eq_ignore_ascii_case("bearer") && token.trim() == expected_api_key
         })
-        .unwrap_or(false);
+        .is_some();
     let query_matches = query_param(target, "api_key").as_deref() == Some(expected_api_key);
+    let protocol_matches = matching_realtime_subprotocol(protocols, expected_api_key).is_some();
 
-    if bearer_matches || query_matches {
-        Ok(())
-    } else {
-        Err(anyhow!("missing or invalid API key"))
+    if bearer_matches || query_matches || protocol_matches {
+        return Ok(());
     }
+
+    Err(anyhow!("missing or invalid API key"))
+}
+
+#[cfg(test)]
+fn selected_realtime_subprotocol(protocols: Option<&str>) -> Option<&str> {
+    protocols?
+        .split(',')
+        .map(str::trim)
+        .find(|protocol| protocol.starts_with("openai-insecure-api-key."))
+}
+
+fn matching_realtime_subprotocol<'a>(
+    protocols: Option<&'a str>,
+    expected_api_key: &str,
+) -> Option<&'a str> {
+    protocols?.split(',').map(str::trim).find(|protocol| {
+        protocol
+            .strip_prefix("openai-insecure-api-key.")
+            .is_some_and(|key| !key.is_empty() && key == expected_api_key)
+    })
 }
 
 #[cfg(test)]
@@ -514,10 +559,12 @@ mod tests {
 
     use crate::config::ServerConfig;
     use crate::realtime::RealtimeSession;
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 
     use super::{
         append_final_transcript, encode_query_component, interim_delta, redact_api_key,
-        reset_audio_buffer_converter, validate_api_key, Pcm16Converter, RuntimeConfig,
+        reset_audio_buffer_converter, selected_realtime_subprotocol, validate_api_key,
+        validate_realtime_request, Pcm16Converter, RuntimeConfig,
     };
 
     #[test]
@@ -566,18 +613,27 @@ mod tests {
 
     #[test]
     fn api_key_is_optional_when_not_configured() {
-        validate_api_key(None, "/v1/realtime?model=seed-asr", None).expect("no api key");
+        validate_api_key(None, None, "/v1/realtime?model=seed-asr", None).expect("no api key");
     }
 
     #[test]
     fn api_key_accepts_bearer_authorization_or_query_param() {
         validate_api_key(
             Some("Bearer local-secret"),
+            None,
             "/v1/realtime?model=seed-asr",
             Some("local-secret"),
         )
         .expect("bearer key");
         validate_api_key(
+            Some("Bearer  local-secret "),
+            None,
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret"),
+        )
+        .expect("bearer key with token whitespace");
+        validate_api_key(
+            None,
             None,
             "/v1/realtime?model=seed-asr&api_key=local-secret",
             Some("local-secret"),
@@ -586,12 +642,133 @@ mod tests {
     }
 
     #[test]
-    fn api_key_rejects_missing_or_invalid_key_when_configured() {
-        assert!(
-            validate_api_key(None, "/v1/realtime?model=seed-asr", Some("local-secret")).is_err()
+    fn accepts_api_key_from_openai_realtime_subprotocol() {
+        validate_api_key(
+            None,
+            Some("realtime, openai-insecure-api-key.local-secret, other"),
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret"),
+        )
+        .expect("subprotocol api key");
+    }
+
+    #[test]
+    fn accepts_api_key_from_later_openai_realtime_subprotocol() {
+        validate_api_key(
+            None,
+            Some("openai-insecure-api-key.bad, openai-insecure-api-key.local-secret"),
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret"),
+        )
+        .expect("later subprotocol api key");
+    }
+
+    #[test]
+    fn rejects_wrong_openai_realtime_subprotocol_api_key() {
+        assert!(validate_api_key(
+            None,
+            Some("openai-insecure-api-key.wrong-secret"),
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret"),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn selects_openai_realtime_api_key_subprotocol_for_response() {
+        assert_eq!(
+            selected_realtime_subprotocol(Some("realtime, openai-insecure-api-key.local-secret")),
+            Some("openai-insecure-api-key.local-secret")
         );
+        assert_eq!(selected_realtime_subprotocol(Some("realtime")), None);
+        assert_eq!(selected_realtime_subprotocol(None), None);
+    }
+
+    #[test]
+    fn bearer_auth_with_wrong_subprotocol_does_not_echo_subprotocol() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: Some("local-secret".to_string()),
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=seed-asr")
+            .header("authorization", "Bearer local-secret")
+            .header(
+                "sec-websocket-protocol",
+                "realtime, openai-insecure-api-key.wrong-secret",
+            )
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        let response =
+            validate_realtime_request(&request, response, &runtime).expect("valid request");
+
+        assert_eq!(response.headers().get("sec-websocket-protocol"), None);
+    }
+
+    #[test]
+    fn handshake_echoes_matching_later_subprotocol() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: Some("local-secret".to_string()),
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=seed-asr")
+            .header(
+                "sec-websocket-protocol",
+                "realtime, openai-insecure-api-key.bad, openai-insecure-api-key.local-secret",
+            )
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        let response =
+            validate_realtime_request(&request, response, &runtime).expect("valid request");
+
+        assert_eq!(
+            response
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|value| value.to_str().ok()),
+            Some("openai-insecure-api-key.local-secret")
+        );
+    }
+
+    #[test]
+    fn disabled_auth_does_not_echo_credential_subprotocol() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: None,
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=seed-asr")
+            .header(
+                "sec-websocket-protocol",
+                "realtime, openai-insecure-api-key.local-secret",
+            )
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        let response =
+            validate_realtime_request(&request, response, &runtime).expect("valid request");
+
+        assert_eq!(response.headers().get("sec-websocket-protocol"), None);
+    }
+
+    #[test]
+    fn api_key_rejects_missing_or_invalid_key_when_configured() {
+        assert!(validate_api_key(
+            None,
+            None,
+            "/v1/realtime?model=seed-asr",
+            Some("local-secret")
+        )
+        .is_err());
         assert!(validate_api_key(
             Some("Bearer wrong"),
+            None,
             "/v1/realtime?model=seed-asr",
             Some("local-secret"),
         )
