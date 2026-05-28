@@ -28,6 +28,7 @@ let mutedOutput = null;
 let frameCount = 0;
 let isRecording = false;
 let transcriptText = "";
+let committedTranscriptText = "";
 let signalTargetLevel = 0;
 let signalDisplayLevel = 0;
 let signalLastState = "quiet";
@@ -232,6 +233,10 @@ function setText(el, text) {
   el.classList.toggle("empty", !text);
 }
 
+function normalizeTranscript(text) {
+  return (text || "").replace(/\s+/g, " ").trim();
+}
+
 function createTranscriptLine(text, index, active) {
   const row = document.createElement("div");
   row.className = `transcript-line${active ? " active" : ""}`;
@@ -249,12 +254,10 @@ function createTranscriptLine(text, index, active) {
 }
 
 function splitTranscript(text) {
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const normalized = normalizeTranscript(text);
   if (!normalized) return [];
 
-  const phrases = normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [
-    normalized,
-  ];
+  const phrases = transcriptPhrases(normalized);
   const lines = [];
   for (const phrase of phrases) {
     let rest = phrase.trim();
@@ -270,8 +273,39 @@ function splitTranscript(text) {
   return lines;
 }
 
+function transcriptPhrases(text) {
+  const normalized = normalizeTranscript(text);
+  if (!normalized) return [];
+  return (normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [
+    normalized,
+  ]).map((phrase) => phrase.trim()).filter(Boolean);
+}
+
+function joinTranscriptParts(parts) {
+  return parts.reduce((joined, part) => {
+    if (!joined) return part;
+    if (/[\w.!?;]$/.test(joined) && /^[\w]/.test(part)) {
+      return `${joined} ${part}`;
+    }
+    return `${joined}${part}`;
+  }, "");
+}
+
+function partitionTranscript(text) {
+  const phrases = transcriptPhrases(text);
+  if (phrases.length <= 1) {
+    return {
+      committed: "",
+      active: normalizeTranscript(text),
+    };
+  }
+  return {
+    committed: joinTranscriptParts(phrases.slice(0, -1)),
+    active: phrases[phrases.length - 1],
+  };
+}
+
 function renderTranscript(text) {
-  transcriptText = text;
   const lines = splitTranscript(text);
   els.partial.replaceChildren();
   els.partial.classList.toggle("empty", lines.length === 0);
@@ -284,15 +318,28 @@ function renderTranscript(text) {
 }
 
 function renderLiveTranscript(text) {
-  renderTranscript(text);
-  renderFinalTranscript(transcriptText);
+  transcriptText = normalizeTranscript(text);
+  const { committed, active } = partitionTranscript(text);
+  committedTranscriptText = committed;
+  renderTranscript(active);
+  renderFinalTranscript(committedTranscriptText);
 }
 
 function renderFinalTranscript(text) {
   setText(els.final, text);
+  els.final.scrollTop = els.final.scrollHeight;
+}
+
+function commitFinalTranscript(text) {
+  transcriptText = normalizeTranscript(text);
+  committedTranscriptText = transcriptText;
+  renderTranscript("");
+  renderFinalTranscript(committedTranscriptText);
 }
 
 function resetTranscript() {
+  transcriptText = "";
+  committedTranscriptText = "";
   renderTranscript("");
   renderFinalTranscript("");
 }
@@ -377,8 +424,7 @@ async function start() {
       } else if (
         event.type === "conversation.item.input_audio_transcription.completed"
       ) {
-        renderTranscript(event.transcript || transcriptText);
-        renderFinalTranscript(event.transcript || transcriptText);
+        commitFinalTranscript(event.transcript || transcriptText);
         if (!isRecording) setSocket("completed", true);
       } else if (event.type === "error") {
         log(event.error?.message || "error", "error");

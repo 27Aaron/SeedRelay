@@ -24,6 +24,8 @@
     --final-panel-block: calc((100vh - 64px) / 6);
     --transcript-content-size: clamp(14px, 1.05vw, 18px);
     --final-body-color: color-mix(in srgb, var(--ink) 94%, transparent);
+    --scroll-thumb: color-mix(in srgb, var(--accent) 42%, var(--line));
+    --scroll-thumb-hover: color-mix(in srgb, var(--accent) 68%, var(--accent-2));
 }
 
 * {
@@ -390,6 +392,43 @@ button:disabled {
 #final {
     font-family: var(--serif-font);
     letter-spacing: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scroll-thumb) transparent;
+    scrollbar-gutter: stable;
+}
+
+#partial::-webkit-scrollbar,
+#final::-webkit-scrollbar,
+#events::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+#partial::-webkit-scrollbar-track,
+#final::-webkit-scrollbar-track,
+#events::-webkit-scrollbar-track {
+    margin-block: 0;
+    background: transparent;
+}
+
+#partial::-webkit-scrollbar-thumb,
+#final::-webkit-scrollbar-thumb,
+#events::-webkit-scrollbar-thumb {
+    min-height: 34px;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background:
+        linear-gradient(var(--scroll-thumb), var(--scroll-thumb)) padding-box,
+        transparent border-box;
+}
+
+#partial::-webkit-scrollbar-thumb:hover,
+#final::-webkit-scrollbar-thumb:hover,
+#events::-webkit-scrollbar-thumb:hover {
+    background:
+        linear-gradient(var(--scroll-thumb-hover), var(--scroll-thumb-hover))
+            padding-box,
+        transparent border-box;
 }
 
 #partial {

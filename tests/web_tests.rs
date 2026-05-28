@@ -96,16 +96,21 @@ fn index_html_renders_transcript_sections() {
 #[test]
 fn index_html_streams_transcript_as_rows() {
     assert!(APP_JS.contains("const MAX_TRANSCRIPT_LINE = 12;"));
+    assert!(APP_JS.contains("let committedTranscriptText = \"\";"));
+    assert!(APP_JS.contains("function partitionTranscript(text)"));
     assert!(APP_JS.contains("function splitTranscript(text)"));
     assert!(APP_JS.contains("function renderTranscript(text)"));
     assert!(APP_JS.contains("const nextTranscript ="));
     assert!(APP_JS.contains("event.transcript || transcriptText + (event.delta || \"\")"));
+    assert!(APP_JS.contains("const { committed, active } = partitionTranscript(text);"));
+    assert!(APP_JS.contains("renderTranscript(active);"));
+    assert!(APP_JS.contains("renderFinalTranscript(committedTranscriptText);"));
+    assert!(APP_JS.contains("commitFinalTranscript(event.transcript || transcriptText);"));
     assert!(APP_JS.contains("renderLiveTranscript(nextTranscript)"));
-    assert!(APP_JS.contains("renderFinalTranscript(transcriptText)"));
-    assert!(APP_JS.contains("renderFinalTranscript(event.transcript || transcriptText)"));
     assert!(APP_JS.contains("if (!isRecording) setSocket(\"completed\", true);"));
     assert!(!APP_JS.contains("els.partial.textContent + (event.delta || \"\")"));
     assert!(!APP_JS.contains("appendTranscriptDelta(event.delta || \"\")"));
+    assert!(!APP_JS.contains("renderFinalTranscript(transcriptText)"));
     assert!(!APP_JS.contains("              setSocket(\"completed\", true);"));
 }
 
@@ -218,6 +223,15 @@ fn index_html_scrolls_transcript_rows_within_a_fixed_panel() {
 }
 
 #[test]
+fn index_html_uses_refined_scrollbars() {
+    assert!(STYLES_CSS.contains("scrollbar-width: thin;"));
+    assert!(STYLES_CSS.contains("scrollbar-gutter: stable;"));
+    assert!(STYLES_CSS.contains("::-webkit-scrollbar"));
+    assert!(STYLES_CSS.contains("::-webkit-scrollbar-thumb"));
+    assert!(STYLES_CSS.contains("margin-block: 0;"));
+}
+
+#[test]
 fn index_html_uses_smaller_transcript_body_type() {
     assert!(STYLES_CSS.contains("--transcript-content-size: clamp(14px, 1.05vw, 18px);"));
     assert!(
@@ -228,6 +242,7 @@ fn index_html_uses_smaller_transcript_body_type() {
     assert!(!STYLES_CSS.contains("--final-body-size"));
     assert!(STYLES_CSS.contains("color: var(--final-body-color);"));
     assert!(APP_JS.contains("els.partial.scrollTop = els.partial.scrollHeight;"));
+    assert!(APP_JS.contains("els.final.scrollTop = els.final.scrollHeight;"));
     assert!(!STYLES_CSS.contains("font-size: clamp(20px, 2.2vw, 32px);"));
     assert!(!STYLES_CSS.contains("font-size: clamp(18px, 2vw, 28px);"));
 }
