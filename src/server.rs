@@ -582,7 +582,11 @@ async fn handle_client_event(
             send_json(write, input_audio_cleared_event()).await?;
         }
         ClientEvent::Commit => {
-            active_turn.ensure_started(credentials.clone(), turn_output_tx.clone())?;
+            let tx = active_turn.ensure_started(credentials.clone(), turn_output_tx.clone())?;
+            let pcm = converter.finish();
+            if !pcm.is_empty() {
+                tx.send(pcm).await.context("ASR audio channel closed")?;
+            }
             active_turn.close_input();
             send_json(write, input_audio_committed_event(&active_turn.item_id)).await?;
         }
@@ -756,6 +760,14 @@ impl Pcm16Converter {
             .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / 32768.0)
             .collect::<Vec<_>>();
         self.resampler.push_mono_f32(&samples)
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        if self.input_sample_rate == 16_000 {
+            return Vec::new();
+        }
+
+        self.resampler.finish()
     }
 }
 
@@ -942,6 +954,15 @@ mod tests {
         assert!(converter.push(&1i16.to_le_bytes()).is_empty());
         reset_audio_buffer_converter(&mut converter, &session);
         assert!(converter.push(&2i16.to_le_bytes()).is_empty());
+    }
+
+    #[test]
+    fn pcm16_converter_finish_flushes_resampler_tail() {
+        let mut converter = Pcm16Converter::new(48_000);
+
+        assert!(converter.push(&1234i16.to_le_bytes()).is_empty());
+        assert_eq!(converter.finish().len(), 2);
+        assert!(converter.finish().is_empty());
     }
 
     #[test]

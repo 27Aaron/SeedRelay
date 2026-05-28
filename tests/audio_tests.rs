@@ -29,3 +29,15 @@ fn linear_resampler_converts_mono_f32_to_pcm16_bytes() {
     assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 0);
     assert_eq!(i16::from_le_bytes([bytes[2], bytes[3]]), 32767);
 }
+
+#[test]
+fn linear_resampler_flushes_tail_sample_on_finish() {
+    let mut resampler = LinearPcmResampler::new(48_000, 16_000);
+
+    assert!(resampler.push_mono_f32(&[0.5]).is_empty());
+    let bytes = resampler.finish();
+
+    assert_eq!(bytes.len(), 2);
+    assert_eq!(i16::from_le_bytes([bytes[0], bytes[1]]), 16384);
+    assert!(resampler.finish().is_empty());
+}

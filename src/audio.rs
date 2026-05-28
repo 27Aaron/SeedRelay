@@ -132,6 +132,18 @@ impl LinearPcmResampler {
 
         pcm
     }
+
+    pub fn finish(&mut self) -> Vec<u8> {
+        if self.buffer.is_empty() {
+            return Vec::new();
+        }
+
+        let index = (self.cursor.floor() as usize).min(self.buffer.len() - 1);
+        let sample = f32_to_i16(self.buffer[index]);
+        self.buffer.clear();
+        self.cursor = 0.0;
+        sample.to_le_bytes().to_vec()
+    }
 }
 
 fn f32_to_i16(sample: f32) -> i16 {
