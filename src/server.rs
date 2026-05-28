@@ -267,7 +267,7 @@ impl RuntimeConfig {
         &self,
         bind: SocketAddr,
         web_enabled: bool,
-        credentials_path: &Path,
+        _credentials_path: &Path,
     ) -> Vec<String> {
         let lines = vec![
             "SeedRelay ready".to_string(),
@@ -281,7 +281,6 @@ impl RuntimeConfig {
                     "disabled"
                 }
             ),
-            format!("  Credentials {}", credentials_path.display()),
             format!(
                 "  Web UI    {}",
                 if web_enabled {
@@ -1481,7 +1480,7 @@ mod tests {
     }
 
     #[test]
-    fn startup_lines_are_readable_and_hide_key() {
+    fn startup_lines_are_readable_and_hide_sensitive_runtime_details() {
         let runtime = RuntimeConfig::new(ServerConfig {
             bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8000),
             model: "custom/asr".to_string(),
@@ -1499,9 +1498,12 @@ mod tests {
             &"  Realtime  ws://127.0.0.1:8000/v1/realtime?model=custom%2Fasr".to_string()
         ));
         assert!(lines.contains(&"  Auth      API key required".to_string()));
-        assert!(lines.contains(&"  Credentials /tmp/seedrelay-credentials.json".to_string()));
         assert!(lines.contains(&"  Web UI    http://127.0.0.1:8000/".to_string()));
         assert!(!lines.join("\n").contains("local-secret"));
+        assert!(!lines.iter().any(|line| line.contains("Credentials")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.contains("/tmp/seedrelay-credentials.json")));
     }
 
     #[test]
@@ -1521,8 +1523,11 @@ mod tests {
         assert!(lines
             .contains(&"  Realtime  ws://127.0.0.1:8000/v1/realtime?model=seed-asr".to_string()));
         assert!(lines.contains(&"  Auth      disabled".to_string()));
-        assert!(lines.contains(&"  Credentials .seedrelay/credentials.json".to_string()));
         assert!(lines.contains(&"  Web UI    disabled".to_string()));
+        assert!(!lines.iter().any(|line| line.contains("Credentials")));
+        assert!(!lines
+            .iter()
+            .any(|line| line.contains(".seedrelay/credentials.json")));
         assert!(!lines.iter().any(|line| line.contains("Debug")));
     }
 
