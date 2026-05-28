@@ -348,12 +348,13 @@ pub fn input_audio_cleared_event() -> Value {
     })
 }
 
-pub fn transcript_delta_event(item_id: &str, delta: &str) -> Value {
+pub fn transcript_delta_event(item_id: &str, delta: &str, transcript: &str) -> Value {
     json!({
         "type": "conversation.item.input_audio_transcription.delta",
         "item_id": item_id,
         "content_index": 0,
         "delta": delta,
+        "transcript": transcript,
     })
 }
 

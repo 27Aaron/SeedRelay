@@ -46,8 +46,13 @@ struct TurnTranscriptState {
     completed: bool,
 }
 
+struct TranscriptUpdate {
+    delta: String,
+    transcript: String,
+}
+
 impl TurnTranscriptState {
-    fn interim_delta(&mut self, current: &str) -> Option<String> {
+    fn interim_update(&mut self, current: &str) -> Option<TranscriptUpdate> {
         let delta = current
             .strip_prefix(self.interim_transcript.as_str())
             .unwrap_or(current)
@@ -55,19 +60,36 @@ impl TurnTranscriptState {
         self.interim_transcript.clear();
         self.interim_transcript.push_str(current);
 
-        (!delta.is_empty()).then_some(delta)
+        (!delta.is_empty()).then(|| TranscriptUpdate {
+            delta,
+            transcript: self.live_transcript(),
+        })
     }
 
-    fn append_final(&mut self, text: &str) {
+    fn append_final(&mut self, text: &str) -> Option<String> {
         if text.is_empty() {
-            return;
+            return None;
         }
         if text.starts_with(&self.final_transcript) {
             self.final_transcript.clear();
             self.final_transcript.push_str(text);
-            return;
+        } else {
+            self.final_transcript.push_str(text);
         }
-        self.final_transcript.push_str(text);
+        self.interim_transcript.clear();
+        Some(self.live_transcript())
+    }
+
+    fn live_transcript(&self) -> String {
+        match (
+            self.final_transcript.is_empty(),
+            self.interim_transcript.is_empty(),
+        ) {
+            (true, true) => String::new(),
+            (true, false) => self.interim_transcript.clone(),
+            (false, true) => self.final_transcript.clone(),
+            (false, false) => format!("{}{}", self.final_transcript, self.interim_transcript),
+        }
     }
 
     fn completed_transcript(&mut self, fallback: Option<String>) -> Option<&str> {
@@ -77,10 +99,13 @@ impl TurnTranscriptState {
         if self.final_transcript.is_empty() {
             if let Some(fallback) = fallback.filter(|transcript| !transcript.is_empty()) {
                 self.final_transcript = fallback;
+            } else if !self.interim_transcript.is_empty() {
+                self.final_transcript = self.interim_transcript.clone();
             }
         }
+        self.interim_transcript.clear();
         self.completed = true;
-        Some(self.final_transcript.as_str())
+        (!self.final_transcript.is_empty()).then_some(self.final_transcript.as_str())
     }
 }
 
@@ -545,12 +570,26 @@ async fn handle_realtime_socket(
                         }
                         match event {
                             AsrEvent::InterimResult(text) if !text.is_empty() => {
-                                if let Some(delta) = active_turn.transcript.interim_delta(&text) {
-                                    send_json(&mut write, transcript_delta_event(&item_id, &delta)).await?;
+                                if let Some(update) = active_turn.transcript.interim_update(&text) {
+                                    send_json(
+                                        &mut write,
+                                        transcript_delta_event(
+                                            &item_id,
+                                            &update.delta,
+                                            &update.transcript,
+                                        ),
+                                    )
+                                    .await?;
                                 }
                             }
                             AsrEvent::FinalResult(text) if !text.is_empty() => {
-                                active_turn.transcript.append_final(&text);
+                                if let Some(transcript) = active_turn.transcript.append_final(&text) {
+                                    send_json(
+                                        &mut write,
+                                        transcript_delta_event(&item_id, "", &transcript),
+                                    )
+                                    .await?;
+                                }
                             }
                             AsrEvent::SessionFinished => {
                                 if let Some(transcript) = active_turn.transcript.completed_transcript(None) {
@@ -852,9 +891,41 @@ mod tests {
     fn turn_transcript_state_emits_incremental_delta() {
         let mut state = TurnTranscriptState::default();
 
-        assert_eq!(state.interim_delta("你好"), Some("你好".to_string()));
-        assert_eq!(state.interim_delta("你好世界"), Some("世界".to_string()));
-        assert_eq!(state.interim_delta("你好世界"), None);
+        let first = state.interim_update("你好").expect("first update");
+        assert_eq!(first.delta, "你好");
+        assert_eq!(first.transcript, "你好");
+
+        let second = state.interim_update("你好世界").expect("second update");
+        assert_eq!(second.delta, "世界");
+        assert_eq!(second.transcript, "你好世界");
+
+        assert!(state.interim_update("你好世界").is_none());
+    }
+
+    #[test]
+    fn turn_transcript_state_exposes_corrected_interim_snapshot() {
+        let mut state = TurnTranscriptState::default();
+
+        state.interim_update("今天天气不错").expect("first update");
+        let corrected = state
+            .interim_update("今天天气很好。")
+            .expect("corrected update");
+
+        assert_eq!(corrected.delta, "今天天气很好。");
+        assert_eq!(corrected.transcript, "今天天气很好。");
+    }
+
+    #[test]
+    fn turn_transcript_state_final_update_replaces_interim_snapshot() {
+        let mut state = TurnTranscriptState::default();
+
+        state
+            .interim_update("今天天气不错")
+            .expect("interim update");
+        let transcript = state.append_final("今天天气很好。");
+
+        assert_eq!(transcript.as_deref(), Some("今天天气很好。"));
+        assert_eq!(state.live_transcript(), "今天天气很好。");
     }
 
     #[test]

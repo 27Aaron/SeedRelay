@@ -283,13 +283,18 @@ function renderTranscript(text) {
   els.partial.scrollTop = els.partial.scrollHeight;
 }
 
-function appendTranscriptDelta(delta) {
-  renderTranscript(transcriptText + delta);
+function renderLiveTranscript(text) {
+  renderTranscript(text);
+  renderFinalTranscript(transcriptText);
+}
+
+function renderFinalTranscript(text) {
+  setText(els.final, text);
 }
 
 function resetTranscript() {
   renderTranscript("");
-  setText(els.final, "");
+  renderFinalTranscript("");
 }
 
 async function start() {
@@ -366,12 +371,14 @@ async function start() {
         return;
       }
       if (event.type === "conversation.item.input_audio_transcription.delta") {
-        appendTranscriptDelta(event.delta || "");
+        const nextTranscript =
+          event.transcript || transcriptText + (event.delta || "");
+        renderLiveTranscript(nextTranscript);
       } else if (
         event.type === "conversation.item.input_audio_transcription.completed"
       ) {
         renderTranscript(event.transcript || transcriptText);
-        setText(els.final, event.transcript || transcriptText);
+        renderFinalTranscript(event.transcript || transcriptText);
         if (!isRecording) setSocket("completed", true);
       } else if (event.type === "error") {
         log(event.error?.message || "error", "error");

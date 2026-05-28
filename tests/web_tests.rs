@@ -98,10 +98,14 @@ fn index_html_streams_transcript_as_rows() {
     assert!(APP_JS.contains("const MAX_TRANSCRIPT_LINE = 12;"));
     assert!(APP_JS.contains("function splitTranscript(text)"));
     assert!(APP_JS.contains("function renderTranscript(text)"));
-    assert!(APP_JS.contains("appendTranscriptDelta(event.delta || \"\")"));
-    assert!(APP_JS.contains("renderTranscript(event.transcript || transcriptText)"));
+    assert!(APP_JS.contains("const nextTranscript ="));
+    assert!(APP_JS.contains("event.transcript || transcriptText + (event.delta || \"\")"));
+    assert!(APP_JS.contains("renderLiveTranscript(nextTranscript)"));
+    assert!(APP_JS.contains("renderFinalTranscript(transcriptText)"));
+    assert!(APP_JS.contains("renderFinalTranscript(event.transcript || transcriptText)"));
     assert!(APP_JS.contains("if (!isRecording) setSocket(\"completed\", true);"));
     assert!(!APP_JS.contains("els.partial.textContent + (event.delta || \"\")"));
+    assert!(!APP_JS.contains("appendTranscriptDelta(event.delta || \"\")"));
     assert!(!APP_JS.contains("              setSocket(\"completed\", true);"));
 }
 

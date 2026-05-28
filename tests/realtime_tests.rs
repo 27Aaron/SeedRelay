@@ -406,7 +406,7 @@ fn decodes_clear_event() {
 fn renders_openai_style_transcript_events() {
     let session = RealtimeSession::with_id("sess_test", "custom-asr");
     let updated = session_updated_event(&session);
-    let delta = transcript_delta_event("item-1", "你好");
+    let delta = transcript_delta_event("item-1", "你好", "你好，世界");
     let completed = transcript_completed_event("item-1", "你好，世界");
 
     assert_eq!(updated["type"], "session.updated");
@@ -423,6 +423,7 @@ fn renders_openai_style_transcript_events() {
     assert_eq!(delta["item_id"], "item-1");
     assert_eq!(delta["content_index"], 0);
     assert_eq!(delta["delta"], "你好");
+    assert_eq!(delta["transcript"], "你好，世界");
     assert_eq!(
         completed["type"],
         "conversation.item.input_audio_transcription.completed"
