@@ -7,6 +7,8 @@ pub const REALTIME_PATH: &str = "/v1/realtime";
 pub const MODEL_OBJECT: &str = "model";
 pub const MODEL_OWNER: &str = "seedrelay";
 pub const MODEL_CREATED_AT: u64 = 0;
+pub const MIN_INPUT_SAMPLE_RATE: u32 = 8_000;
+pub const MAX_INPUT_SAMPLE_RATE: u32 = 192_000;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ClientEvent {
@@ -359,11 +361,19 @@ pub fn transcript_completed_event(item_id: &str, transcript: &str) -> Value {
 }
 
 fn parse_input_sample_rate(value: &Value) -> Result<Option<u32>> {
-    optional_u32(
+    let rate = optional_u32(
         value,
         "/session/audio/input/format/rate",
         "session.audio.input.format.rate",
-    )
+    )?;
+    if let Some(rate) = rate {
+        if !(MIN_INPUT_SAMPLE_RATE..=MAX_INPUT_SAMPLE_RATE).contains(&rate) {
+            return Err(anyhow!(
+                "session.audio.input.format.rate must be between {MIN_INPUT_SAMPLE_RATE} and {MAX_INPUT_SAMPLE_RATE}"
+            ));
+        }
+    }
+    Ok(rate)
 }
 
 fn query_param_from_query(query: &str, key: &str) -> Option<String> {

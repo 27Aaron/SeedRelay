@@ -116,7 +116,7 @@ SeedRelay does not implement chat completions, text generation, Responses API, f
 
 | Event | Description |
 |-------|-------------|
-| `session.update` | Configure session (e.g. `input_audio_format`, `input_sample_rate`) |
+| `session.update` | Configure session (e.g. `session.audio.input.format.type`, `session.audio.input.format.rate`) |
 | `input_audio_buffer.append` | Send base64-encoded PCM16 audio chunk |
 | `input_audio_buffer.commit` | Signal end of audio, start transcription |
 | `input_audio_buffer.clear` | Clear buffered audio |

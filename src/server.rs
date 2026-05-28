@@ -38,6 +38,7 @@ struct RuntimeConfig {
 struct TurnTranscriptState {
     interim_transcript: String,
     final_transcript: String,
+    completed: bool,
 }
 
 impl TurnTranscriptState {
@@ -52,12 +53,24 @@ impl TurnTranscriptState {
         (!delta.is_empty()).then_some(delta)
     }
 
-    fn append_final(&mut self, text: &str) -> Option<String> {
+    fn append_final(&mut self, text: &str) {
         if text.is_empty() {
-            return None;
+            return;
         }
         self.final_transcript.push_str(text);
-        Some(self.final_transcript.clone())
+    }
+
+    fn completed_transcript(&mut self, fallback: Option<String>) -> Option<&str> {
+        if self.completed {
+            return None;
+        }
+        if self.final_transcript.is_empty() {
+            if let Some(fallback) = fallback.filter(|transcript| !transcript.is_empty()) {
+                self.final_transcript = fallback;
+            }
+        }
+        self.completed = true;
+        Some(self.final_transcript.as_str())
     }
 }
 
@@ -112,6 +125,11 @@ impl ActiveTurn {
 
     fn close_input(&mut self) {
         self.input = TurnInput::Closed;
+    }
+
+    fn replace_with_idle(&mut self) {
+        self.close_input();
+        *self = Self::new_idle();
     }
 }
 
@@ -484,19 +502,16 @@ async fn handle_realtime_socket(
                                 }
                             }
                             AsrEvent::FinalResult(text) if !text.is_empty() => {
-                                if let Some(transcript) = active_turn.transcript.append_final(&text) {
-                                    send_json(&mut write, transcript_completed_event(&item_id, &transcript)).await?;
-                                }
+                                active_turn.transcript.append_final(&text);
                             }
                             AsrEvent::SessionFinished => {
-                                send_json(
-                                    &mut write,
-                                    transcript_completed_event(
-                                        &item_id,
-                                        &active_turn.transcript.final_transcript,
-                                    ),
-                                )
-                                .await?;
+                                if let Some(transcript) = active_turn.transcript.completed_transcript(None) {
+                                    send_json(
+                                        &mut write,
+                                        transcript_completed_event(&item_id, transcript),
+                                    )
+                                    .await?;
+                                }
                                 active_turn = ActiveTurn::new_idle();
                             }
                             AsrEvent::Error(message) => {
@@ -512,19 +527,15 @@ async fn handle_realtime_socket(
                         }
                         match result {
                             Ok(transcript) => {
-                                if active_turn.transcript.final_transcript.is_empty()
-                                    && !transcript.is_empty()
+                                if let Some(transcript) =
+                                    active_turn.transcript.completed_transcript(Some(transcript))
                                 {
-                                    active_turn.transcript.final_transcript = transcript;
+                                    send_json(
+                                        &mut write,
+                                        transcript_completed_event(&item_id, transcript),
+                                    )
+                                    .await?;
                                 }
-                                send_json(
-                                    &mut write,
-                                    transcript_completed_event(
-                                        &item_id,
-                                        &active_turn.transcript.final_transcript,
-                                    ),
-                                )
-                                .await?;
                                 active_turn = ActiveTurn::new_idle();
                             }
                             Err(message) => {
@@ -572,6 +583,7 @@ async fn handle_client_event(
         }
         ClientEvent::Clear => {
             reset_audio_buffer_converter(converter, session);
+            active_turn.replace_with_idle();
             send_json(write, input_audio_cleared_event()).await?;
         }
         ClientEvent::Commit => {
@@ -771,9 +783,26 @@ mod tests {
     fn turn_transcript_state_accumulates_final_text() {
         let mut state = TurnTranscriptState::default();
 
-        assert_eq!(state.append_final("你好"), Some("你好".to_string()));
-        assert_eq!(state.append_final("，世界"), Some("你好，世界".to_string()));
-        assert_eq!(state.append_final(""), None);
+        state.append_final("你好");
+        state.append_final("，世界");
+        state.append_final("");
+
+        assert_eq!(state.completed_transcript(None), Some("你好，世界"));
+        assert_eq!(state.completed_transcript(None), None);
+    }
+
+    #[test]
+    fn turn_transcript_state_uses_finished_transcript_when_no_final_text_exists() {
+        let mut state = TurnTranscriptState::default();
+
+        assert_eq!(
+            state.completed_transcript(Some("backend final".to_string())),
+            Some("backend final")
+        );
+        assert_eq!(
+            state.completed_transcript(Some("duplicate".to_string())),
+            None
+        );
     }
 
     #[test]
@@ -827,6 +856,20 @@ mod tests {
         assert_eq!(starts, 1);
         assert_eq!(turn.item_id, item_id);
         assert!(matches!(turn.input, TurnInput::Open(_)));
+    }
+
+    #[test]
+    fn active_turn_clear_replaces_open_turn_with_fresh_idle_item() {
+        let mut turn = ActiveTurn::new_idle();
+        let old_item_id = turn.item_id.clone();
+        let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+
+        turn.ensure_started_with(|_| pcm_tx).expect("open input");
+        turn.replace_with_idle();
+
+        assert_ne!(turn.item_id, old_item_id);
+        assert!(matches!(turn.input, TurnInput::Idle));
+        assert!(pcm_rx.is_closed());
     }
 
     #[test]

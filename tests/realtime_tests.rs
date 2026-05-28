@@ -69,6 +69,28 @@ fn decodes_nested_session_update_fields() {
 }
 
 #[test]
+fn accepts_browser_session_update_sample_rates() {
+    for rate in [44_100, 48_000, 192_000] {
+        let raw = r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"rate":RATE}}}}}"#
+            .replace("RATE", &rate.to_string());
+        let event = decode_client_event(&raw).expect("browser sample rate");
+
+        assert_eq!(
+            event,
+            ClientEvent::SessionUpdate(SessionUpdateConfig {
+                input_sample_rate: Some(rate),
+                input_audio_format_type: None,
+                transcription_model: None,
+                language: None,
+                delay: None,
+                turn_detection_disabled: false,
+                include: Vec::new(),
+            })
+        );
+    }
+}
+
+#[test]
 fn rejects_unsupported_session_update_type() {
     let error = decode_client_event(r#"{"type":"session.update","session":{"type":"realtime"}}"#)
         .expect_err("unsupported session type");
@@ -130,6 +152,14 @@ fn rejects_malformed_session_update_supported_fields() {
         ),
         (
             r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"rate":0}}}}}"#,
+            "rate",
+        ),
+        (
+            r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"rate":1}}}}}"#,
+            "rate",
+        ),
+        (
+            r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"rate":192001}}}}}"#,
             "rate",
         ),
         (
