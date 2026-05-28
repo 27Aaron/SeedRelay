@@ -1,4 +1,8 @@
-use seedrelay::credentials::{default_credentials_path, is_jwt_expired, CachedCredentials};
+use std::time::Duration;
+
+use seedrelay::credentials::{
+    default_credentials_path, ensure_credentials, is_jwt_expired, CachedCredentials,
+};
 
 #[test]
 fn default_credentials_path_points_to_seedrelay_dir() {
@@ -61,6 +65,23 @@ fn loading_invalid_json_fails() {
 }
 
 #[test]
-fn malformed_jwt_is_treated_as_not_expired() {
-    assert!(!is_jwt_expired("not-a-jwt", 60));
+fn malformed_jwt_is_treated_as_expired() {
+    assert!(is_jwt_expired("not-a-jwt", 60));
+}
+
+#[tokio::test]
+async fn ensure_credentials_returns_invalid_cache_errors() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("credentials.json");
+    std::fs::write(&path, "not json").expect("write invalid");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1))
+        .build()
+        .expect("client");
+
+    let error = ensure_credentials(&client, &path, false)
+        .await
+        .expect_err("invalid cache should fail before registration");
+
+    assert!(error.to_string().contains("invalid credentials file"));
 }

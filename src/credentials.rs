@@ -38,6 +38,13 @@ impl CachedCredentials {
             .with_context(|| format!("invalid credentials file {}", path.display()))
     }
 
+    fn has_registration_identity(&self) -> bool {
+        !self.device_id.is_empty()
+            && !self.cdid.is_empty()
+            && !self.openudid.is_empty()
+            && !self.clientudid.is_empty()
+    }
+
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -54,16 +61,16 @@ pub fn default_credentials_path() -> PathBuf {
 
 pub fn is_jwt_expired(token: &str, margin_seconds: u64) -> bool {
     let Some(payload) = token.split('.').nth(1) else {
-        return false;
+        return true;
     };
     let Ok(decoded) = URL_SAFE_NO_PAD.decode(payload) else {
-        return false;
+        return true;
     };
     let Ok(json) = serde_json::from_slice::<Value>(&decoded) else {
-        return false;
+        return true;
     };
     let Some(exp) = json.get("exp").and_then(Value::as_u64) else {
-        return false;
+        return true;
     };
     now_seconds() >= exp.saturating_sub(margin_seconds)
 }
@@ -77,14 +84,15 @@ pub async fn ensure_credentials(
         fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
     }
 
-    if let Ok(cached) = CachedCredentials::load(path) {
-        if !cached.device_id.is_empty()
+    if path.exists() {
+        let cached = CachedCredentials::load(path)?;
+        if cached.has_registration_identity()
             && !cached.token.is_empty()
             && !is_jwt_expired(&cached.token, 60)
         {
             return Ok(cached);
         }
-        if !cached.device_id.is_empty() {
+        if cached.has_registration_identity() {
             let mut updated = cached;
             updated.token = fetch_asr_token(client, &updated.device_id, &updated.cdid).await?;
             updated.save(path)?;
