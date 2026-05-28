@@ -761,6 +761,7 @@ mod tests {
     use crate::realtime::{decode_client_event, RealtimeSession};
     use tokio::sync::mpsc;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+    use tokio_tungstenite::tungstenite::http::StatusCode;
     use tokio_tungstenite::tungstenite::Message;
 
     use super::{
@@ -884,6 +885,41 @@ mod tests {
         let message = decode_socket_message(Message::Close(None)).expect("close frame");
 
         assert!(matches!(message, SocketMessage::Close));
+    }
+
+    #[test]
+    fn websocket_text_and_binary_messages_decode_to_client_events() {
+        let text = decode_socket_message(Message::Text(
+            r#"{"type":"input_audio_buffer.commit"}"#.into(),
+        ))
+        .expect("text message");
+        let binary = decode_socket_message(Message::Binary(
+            br#"{"type":"input_audio_buffer.clear"}"#.to_vec().into(),
+        ))
+        .expect("binary message");
+
+        assert!(matches!(text, SocketMessage::ClientEvent(raw) if raw.contains("commit")));
+        assert!(matches!(binary, SocketMessage::ClientEvent(raw) if raw.contains("clear")));
+    }
+
+    #[test]
+    fn websocket_binary_messages_must_be_utf8() {
+        let error = match decode_socket_message(Message::Binary(vec![0xff, 0xfe].into())) {
+            Ok(_) => panic!("invalid utf8 should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("binary message is not UTF-8"));
+    }
+
+    #[test]
+    fn websocket_control_messages_are_rejected_except_close() {
+        let error = match decode_socket_message(Message::Ping(Vec::new().into())) {
+            Ok(_) => panic!("unsupported control message should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("unsupported websocket message"));
     }
 
     #[test]
@@ -1041,6 +1077,32 @@ mod tests {
             validate_realtime_request(&request, response, &runtime).expect("valid request");
 
         assert_eq!(response.headers().get("sec-websocket-protocol"), None);
+    }
+
+    #[test]
+    fn realtime_request_rejects_wrong_model_before_auth_echo() {
+        let runtime = RuntimeConfig {
+            model: "seed-asr".to_string(),
+            api_key: Some("local-secret".to_string()),
+        };
+        let request = Request::builder()
+            .uri("/v1/realtime?model=other-asr")
+            .header(
+                "sec-websocket-protocol",
+                "realtime, openai-insecure-api-key.local-secret",
+            )
+            .body(())
+            .expect("request");
+        let response = Response::builder().body(()).expect("response");
+
+        let error = validate_realtime_request(&request, response, &runtime)
+            .expect_err("wrong model should fail");
+
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+        assert!(error
+            .body()
+            .as_deref()
+            .is_some_and(|body| body.contains("only model=seed-asr is supported")));
     }
 
     #[test]

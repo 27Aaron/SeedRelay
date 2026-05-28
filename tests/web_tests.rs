@@ -265,6 +265,36 @@ fn rejects_unknown_http_path() {
 }
 
 #[test]
+fn health_endpoint_is_available_even_when_web_ui_is_disabled() {
+    let config = WebRuntimeConfig::default();
+    let get = http_response_with_config("GET", "/health", &config, false).expect("health get");
+    let head = http_response_with_config("HEAD", "/health", &config, false).expect("health head");
+
+    assert!(get.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(get.ends_with(r#"{"ok":true}"#));
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(head.contains("content-length: 11\r\n"));
+    assert!(head.ends_with("\r\n\r\n"));
+    assert!(!head.ends_with(r#"{"ok":true}"#));
+}
+
+#[test]
+fn web_ui_assets_return_404_when_web_ui_is_disabled() {
+    let config = WebRuntimeConfig::default();
+
+    for target in ["/", "/index.html", "/styles.css", "/app.js", "/config.json"] {
+        let response =
+            http_response_with_config("GET", target, &config, false).expect("disabled web");
+
+        assert!(
+            response.starts_with("HTTP/1.1 404 Not Found\r\n"),
+            "{target} should be disabled"
+        );
+        assert!(response.ends_with("not found"));
+    }
+}
+
+#[test]
 fn serves_openai_model_list_endpoint() {
     let config = WebRuntimeConfig {
         model: "custom-asr".into(),
@@ -278,6 +308,19 @@ fn serves_openai_model_list_endpoint() {
     assert!(response.contains(r#""object":"list""#));
     assert!(response.contains(r#""id":"custom-asr""#));
     assert!(response.contains(r#""owned_by":"seedrelay""#));
+}
+
+#[test]
+fn openai_model_endpoints_work_when_web_ui_is_disabled() {
+    let config = WebRuntimeConfig {
+        model: "seed-asr".into(),
+        api_key: None,
+    };
+    let response =
+        http_response_with_config("GET", "/v1/models", &config, false).expect("models response");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains(r#""id":"seed-asr""#));
 }
 
 #[test]
@@ -295,6 +338,22 @@ fn serves_openai_single_model_endpoint() {
 }
 
 #[test]
+fn serves_encoded_openai_model_names_with_spaces() {
+    let config = WebRuntimeConfig {
+        model: "custom/asr v2".into(),
+        api_key: None,
+    };
+
+    for target in ["/v1/models/custom%2Fasr%20v2", "/v1/models/custom%2Fasr+v2"] {
+        let response =
+            http_response_with_config("GET", target, &config, false).expect("model response");
+
+        assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(response.contains(r#""id":"custom/asr v2""#));
+    }
+}
+
+#[test]
 fn returns_model_not_found_for_unknown_model_endpoint() {
     let config = WebRuntimeConfig {
         model: "seed-asr".into(),
@@ -306,6 +365,37 @@ fn returns_model_not_found_for_unknown_model_endpoint() {
     assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
     assert!(response.contains(r#""code":"model_not_found""#));
     assert!(response.contains(r#""param":"model""#));
+}
+
+#[test]
+fn openai_model_endpoint_errors_include_requested_encoded_model() {
+    let config = WebRuntimeConfig {
+        model: "seed-asr".into(),
+        api_key: None,
+    };
+    let response = http_response_with_config("GET", "/v1/models/missing%2Fasr+v1", &config, false)
+        .expect("missing model response");
+
+    assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+    assert!(response.contains("missing/asr v1"));
+    assert!(response.contains(r#""code":"model_not_found""#));
+}
+
+#[test]
+fn unsupported_methods_do_not_serve_openai_model_endpoints() {
+    let config = WebRuntimeConfig {
+        model: "seed-asr".into(),
+        api_key: None,
+    };
+
+    for target in ["/v1/models", "/v1/models/seed-asr"] {
+        let response =
+            http_response_with_config("POST", target, &config, false).expect("method response");
+
+        assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+        assert!(!response.contains(r#""object":"list""#));
+        assert!(!response.contains(r#""object":"model""#));
+    }
 }
 
 #[test]

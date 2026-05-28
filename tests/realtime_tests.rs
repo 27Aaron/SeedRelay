@@ -32,6 +32,80 @@ fn decodes_append_event_audio_payload() {
 }
 
 #[test]
+fn decodes_session_prefixed_audio_buffer_aliases() {
+    let audio = STANDARD.encode([9u8, 8, 7]);
+    let append = decode_client_event(&format!(
+        r#"{{"type":"session.input_audio_buffer.append","audio":"{audio}"}}"#
+    ))
+    .expect("prefixed append");
+    let commit = decode_client_event(r#"{"type":"session.input_audio_buffer.commit"}"#)
+        .expect("prefixed commit");
+    let clear =
+        decode_client_event(r#"{"type":"session.input_audio_buffer.clear"}"#).expect("clear");
+
+    assert_eq!(append, ClientEvent::AppendAudio(vec![9, 8, 7]));
+    assert_eq!(commit, ClientEvent::Commit);
+    assert_eq!(clear, ClientEvent::Clear);
+}
+
+#[test]
+fn decodes_commit_and_close_events() {
+    assert_eq!(
+        decode_client_event(r#"{"type":"input_audio_buffer.commit"}"#).expect("commit"),
+        ClientEvent::Commit
+    );
+    assert_eq!(
+        decode_client_event(r#"{"type":"session.close"}"#).expect("close"),
+        ClientEvent::Close
+    );
+}
+
+#[test]
+fn rejects_invalid_or_unknown_client_events() {
+    for (raw, expected) in [
+        ("not json", "invalid JSON"),
+        (r#"{"audio":""}"#, "missing type"),
+        (r#"{"type":123}"#, "missing type"),
+        (
+            r#"{"type":"response.create"}"#,
+            "unsupported client event type",
+        ),
+    ] {
+        let error = decode_client_event(raw).expect_err("invalid client event");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?} in {error}"
+        );
+    }
+}
+
+#[test]
+fn rejects_append_events_without_valid_audio() {
+    for (raw, expected) in [
+        (
+            r#"{"type":"input_audio_buffer.append"}"#,
+            "append event missing audio",
+        ),
+        (
+            r#"{"type":"input_audio_buffer.append","audio":123}"#,
+            "append event missing audio",
+        ),
+        (
+            r#"{"type":"input_audio_buffer.append","audio":"not base64"}"#,
+            "invalid base64 audio",
+        ),
+    ] {
+        let error = decode_client_event(raw).expect_err("invalid append event");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?} in {error}"
+        );
+    }
+}
+
+#[test]
 fn decodes_nested_session_update_fields() {
     let event = decode_client_event(
         r#"{
@@ -218,6 +292,98 @@ fn rejected_session_update_does_not_mutate_session() {
 }
 
 #[test]
+fn applies_session_update_to_realtime_session() {
+    let mut session = RealtimeSession::with_id("sess_test", "old-model");
+    let update = SessionUpdateConfig {
+        input_sample_rate: Some(48_000),
+        input_audio_format_type: Some("audio/pcm".into()),
+        transcription_model: Some("seed-asr".into()),
+        language: Some("zh".into()),
+        delay: None,
+        turn_detection_disabled: true,
+        include: Vec::new(),
+    };
+
+    let rate_changed = update
+        .apply_to(&mut session, "seed-asr")
+        .expect("supported update");
+
+    assert!(rate_changed);
+    assert_eq!(session.input_sample_rate, 48_000);
+    assert_eq!(session.input_audio_format_type, "audio/pcm");
+    assert_eq!(session.model, "seed-asr");
+    assert_eq!(session.language.as_deref(), Some("zh"));
+}
+
+#[test]
+fn rejects_unsupported_session_update_apply_fields_without_mutation() {
+    for (update, expected) in [
+        (
+            SessionUpdateConfig {
+                input_sample_rate: None,
+                input_audio_format_type: Some("audio/webm".into()),
+                transcription_model: None,
+                language: None,
+                delay: None,
+                turn_detection_disabled: false,
+                include: Vec::new(),
+            },
+            "only audio/pcm",
+        ),
+        (
+            SessionUpdateConfig {
+                input_sample_rate: None,
+                input_audio_format_type: None,
+                transcription_model: Some("other-asr".into()),
+                language: None,
+                delay: None,
+                turn_detection_disabled: false,
+                include: Vec::new(),
+            },
+            "only transcription model",
+        ),
+        (
+            SessionUpdateConfig {
+                input_sample_rate: None,
+                input_audio_format_type: None,
+                transcription_model: None,
+                language: None,
+                delay: None,
+                turn_detection_disabled: false,
+                include: vec!["item.input_audio_transcription.logprobs".into()],
+            },
+            "session.include",
+        ),
+        (
+            SessionUpdateConfig {
+                input_sample_rate: None,
+                input_audio_format_type: None,
+                transcription_model: None,
+                language: None,
+                delay: Some("500ms".into()),
+                turn_detection_disabled: false,
+                include: Vec::new(),
+            },
+            "delay",
+        ),
+    ] {
+        let mut session = RealtimeSession::with_id("sess_test", "seed-asr");
+        session.language = Some("en".into());
+        let original = session.clone();
+
+        let error = update
+            .apply_to(&mut session, "seed-asr")
+            .expect_err("unsupported update");
+
+        assert!(
+            error.to_string().contains(expected),
+            "expected {expected:?} in {error}"
+        );
+        assert_eq!(session, original);
+    }
+}
+
+#[test]
 fn decodes_clear_event() {
     let event = decode_client_event(r#"{"type":"input_audio_buffer.clear"}"#).expect("clear event");
 
@@ -310,6 +476,30 @@ fn renders_session_created_event_with_session_id() {
         "audio/pcm"
     );
     assert_eq!(event["session"]["audio"]["input"]["format"]["rate"], 24_000);
+}
+
+#[test]
+fn session_events_reflect_applied_language_and_sample_rate() {
+    let mut session = RealtimeSession::with_id("sess_test", "seed-asr");
+    SessionUpdateConfig {
+        input_sample_rate: Some(16_000),
+        input_audio_format_type: Some("audio/pcm".into()),
+        transcription_model: None,
+        language: Some("en".into()),
+        delay: None,
+        turn_detection_disabled: false,
+        include: Vec::new(),
+    }
+    .apply_to(&mut session, "seed-asr")
+    .expect("session update");
+
+    let event = session_updated_event(&session);
+
+    assert_eq!(event["session"]["audio"]["input"]["format"]["rate"], 16_000);
+    assert_eq!(
+        event["session"]["audio"]["input"]["transcription"]["language"],
+        "en"
+    );
 }
 
 #[test]
