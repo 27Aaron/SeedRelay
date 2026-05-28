@@ -263,3 +263,62 @@ fn rejects_unknown_http_path() {
 
     assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
 }
+
+#[test]
+fn serves_openai_model_list_endpoint() {
+    let config = WebRuntimeConfig {
+        model: "custom-asr".into(),
+        api_key: None,
+    };
+    let response =
+        http_response_with_config("GET", "/v1/models", &config, false).expect("models response");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("content-type: application/json; charset=utf-8\r\n"));
+    assert!(response.contains(r#""object":"list""#));
+    assert!(response.contains(r#""id":"custom-asr""#));
+    assert!(response.contains(r#""owned_by":"seedrelay""#));
+}
+
+#[test]
+fn serves_openai_single_model_endpoint() {
+    let config = WebRuntimeConfig {
+        model: "custom/asr".into(),
+        api_key: None,
+    };
+    let response = http_response_with_config("GET", "/v1/models/custom%2Fasr", &config, false)
+        .expect("model response");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains(r#""id":"custom/asr""#));
+    assert!(response.contains(r#""object":"model""#));
+}
+
+#[test]
+fn returns_model_not_found_for_unknown_model_endpoint() {
+    let config = WebRuntimeConfig {
+        model: "seed-asr".into(),
+        api_key: None,
+    };
+    let response = http_response_with_config("GET", "/v1/models/other", &config, false)
+        .expect("missing model response");
+
+    assert!(response.starts_with("HTTP/1.1 404 Not Found\r\n"));
+    assert!(response.contains(r#""code":"model_not_found""#));
+    assert!(response.contains(r#""param":"model""#));
+}
+
+#[test]
+fn model_endpoints_support_head_without_body() {
+    let config = WebRuntimeConfig {
+        model: "seed-asr".into(),
+        api_key: None,
+    };
+    let response =
+        http_response_with_config("HEAD", "/v1/models", &config, false).expect("models head");
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.contains("content-length: "));
+    assert!(response.ends_with("\r\n\r\n"));
+    assert!(!response.contains(r#""object":"list""#));
+}

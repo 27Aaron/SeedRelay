@@ -156,11 +156,11 @@ fn parse_input_sample_rate(value: &Value) -> Option<u32> {
 fn query_param_from_query(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|pair| {
         let (entry_key, value) = pair.split_once('=').unwrap_or((pair, ""));
-        (decode_query_component(entry_key) == key).then(|| decode_query_component(value))
+        (decode_url_component(entry_key) == key).then(|| decode_url_component(value))
     })
 }
 
-fn decode_query_component(value: &str) -> String {
+pub(crate) fn decode_url_component(value: &str) -> String {
     let mut output = Vec::with_capacity(value.len());
     let bytes = value.as_bytes();
     let mut index = 0;

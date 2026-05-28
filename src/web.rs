@@ -1,6 +1,9 @@
 use serde_json::json;
 
 use crate::config::DEFAULT_MODEL;
+use crate::realtime::{
+    decode_url_component, model_list_response, model_not_found_error, model_object_response,
+};
 
 pub const INDEX_HTML: &str = include_str!("../web/index.html");
 pub const STYLES_CSS: &str = include_str!("../web/styles.css");
@@ -35,12 +38,25 @@ pub fn http_response_with_config(
 
     // Health endpoint is always available regardless of web_enabled.
     if matches!(method, "GET" | "HEAD") && path == "/health" {
-        return Some(response(
-            "200 OK",
-            "application/json; charset=utf-8",
-            r#"{"ok":true}"#,
-            method == "HEAD",
-        ));
+        return Some(json_response("200 OK", r#"{"ok":true}"#, method == "HEAD"));
+    }
+
+    if matches!(method, "GET" | "HEAD") {
+        if path == "/v1/models" {
+            let body = model_list_response(&config.model).to_string();
+            return Some(json_response("200 OK", &body, method == "HEAD"));
+        }
+
+        if let Some(raw_model) = path.strip_prefix("/v1/models/") {
+            let requested_model = decode_url_component(raw_model);
+            if requested_model == config.model {
+                let body = model_object_response(&config.model).to_string();
+                return Some(json_response("200 OK", &body, method == "HEAD"));
+            }
+
+            let body = model_not_found_error(&requested_model).to_string();
+            return Some(json_response("404 Not Found", &body, method == "HEAD"));
+        }
     }
 
     if !web_enabled {
@@ -122,6 +138,10 @@ fn config_json(config: &WebRuntimeConfig) -> String {
         "apiKey": config.api_key,
     })
     .to_string()
+}
+
+fn json_response(status: &str, body: &str, head_only: bool) -> String {
+    response(status, "application/json; charset=utf-8", body, head_only)
 }
 
 fn response(status: &str, content_type: &str, body: &str, head_only: bool) -> String {
