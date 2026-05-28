@@ -172,11 +172,23 @@ async fn expect_lifecycle_message<S>(read: &mut S, expected: &str) -> Result<()>
 where
     S: Stream<Item = Result<Message, WsError>> + Unpin,
 {
-    let response = read_next_response(read).await?;
-    if response.message_type == expected {
-        return Ok(());
+    loop {
+        let response = read_next_response(read).await?;
+        if response.message_type == expected {
+            return Ok(());
+        }
+
+        let event = classify_response(&WireResponse {
+            message_type: response.message_type.clone(),
+            status_message: response.status_message.clone(),
+            result_json: response.result_json.clone(),
+        });
+        if event == AsrEvent::Heartbeat {
+            continue;
+        }
+
+        return Err(anyhow!(format_lifecycle_error(expected, &response)));
     }
-    Err(anyhow!(format_lifecycle_error(expected, &response)))
 }
 
 pub fn format_lifecycle_error(expected: &str, response: &AsrResponse) -> String {
@@ -239,4 +251,41 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system clock before Unix epoch")
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::stream;
+    use prost::Message as _;
+    use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+
+    use crate::protocol::AsrResponse;
+
+    use super::expect_lifecycle_message;
+
+    fn response(message_type: &str, result_json: &str) -> Message {
+        let response = AsrResponse {
+            request_id: String::new(),
+            task_id: String::new(),
+            service_name: "ASR".to_string(),
+            message_type: message_type.to_string(),
+            status_code: 0,
+            status_message: String::new(),
+            result_json: result_json.to_string(),
+            unknown_field_9: 0,
+        };
+        Message::Binary(response.encode_to_vec().into())
+    }
+
+    #[tokio::test]
+    async fn lifecycle_wait_skips_heartbeat_before_expected_message() {
+        let mut read = stream::iter(vec![
+            Ok::<_, WsError>(response("Result", "")),
+            Ok(response("TaskStarted", "")),
+        ]);
+
+        expect_lifecycle_message(&mut read, "TaskStarted")
+            .await
+            .expect("heartbeat should not fail lifecycle wait");
+    }
 }
