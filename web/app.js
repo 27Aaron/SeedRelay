@@ -358,9 +358,9 @@ function splitTranscript(text) {
 function transcriptPhrases(text) {
   const normalized = normalizeTranscript(text);
   if (!normalized) return [];
-  return (normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [
-    normalized,
-  ]).map((phrase) => phrase.trim()).filter(Boolean);
+  return (normalized.match(/[^。！？!?；;\n]+[。！？!?；;]?/g) || [normalized])
+    .map((phrase) => phrase.trim())
+    .filter(Boolean);
 }
 
 function joinTranscriptParts(parts) {

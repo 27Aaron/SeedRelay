@@ -22,7 +22,11 @@
     --transcript-content-size: clamp(14px, 1.05vw, 18px);
     --final-body-color: color-mix(in srgb, var(--ink) 94%, transparent);
     --scroll-thumb: color-mix(in srgb, var(--accent) 42%, var(--line));
-    --scroll-thumb-hover: color-mix(in srgb, var(--accent) 68%, var(--accent-2));
+    --scroll-thumb-hover: color-mix(
+        in srgb,
+        var(--accent) 68%,
+        var(--accent-2)
+    );
 }
 
 * {
