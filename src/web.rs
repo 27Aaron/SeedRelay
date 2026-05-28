@@ -6,6 +6,7 @@ use crate::realtime::{
 };
 
 pub const INDEX_HTML: &str = include_str!("../web/index.html");
+pub const FONT_CSS: &str = include_str!("../web/font.css");
 pub const STYLES_CSS: &str = include_str!("../web/styles.css");
 pub const APP_JS: &str = include_str!("../web/app.js");
 
@@ -77,6 +78,12 @@ pub fn http_response_with_config(
             STYLES_CSS,
             false,
         )),
+        ("GET", "/font.css") => Some(response(
+            "200 OK",
+            "text/css; charset=utf-8",
+            FONT_CSS,
+            false,
+        )),
         ("GET", "/app.js") => Some(response(
             "200 OK",
             "application/javascript; charset=utf-8",
@@ -102,6 +109,12 @@ pub fn http_response_with_config(
             "200 OK",
             "text/css; charset=utf-8",
             STYLES_CSS,
+            true,
+        )),
+        ("HEAD", "/font.css") => Some(response(
+            "200 OK",
+            "text/css; charset=utf-8",
+            FONT_CSS,
             true,
         )),
         ("HEAD", "/app.js") => Some(response(

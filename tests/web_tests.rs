@@ -1,4 +1,6 @@
-use seedrelay::web::{http_response_with_config, WebRuntimeConfig, APP_JS, INDEX_HTML, STYLES_CSS};
+use seedrelay::web::{
+    http_response_with_config, WebRuntimeConfig, APP_JS, FONT_CSS, INDEX_HTML, STYLES_CSS,
+};
 
 fn default_web_response(method: &str, target: &str) -> Option<String> {
     http_response_with_config(method, target, &WebRuntimeConfig::default(), true)
@@ -27,10 +29,27 @@ fn index_html_loads_runtime_config_for_realtime_endpoint() {
 
 #[test]
 fn index_html_loads_external_assets() {
+    assert!(INDEX_HTML
+        .contains(r#"<link rel="preconnect" href="https://gw.alipayobjects.com" crossorigin />"#));
+    assert!(INDEX_HTML.contains(r#"<link rel="stylesheet" href="/font.css" />"#));
     assert!(INDEX_HTML.contains(r#"<link rel="stylesheet" href="/styles.css" />"#));
     assert!(INDEX_HTML.contains(r#"<script src="/app.js" defer></script>"#));
     assert!(!INDEX_HTML.contains("<style>"));
     assert!(!INDEX_HTML.contains("const els ="));
+}
+
+#[test]
+fn index_html_uses_jinkai_font_across_the_ui() {
+    assert!(FONT_CSS.contains("font-family: 'TsangerJinKai02';"));
+    assert!(FONT_CSS.contains("https://gw.alipayobjects.com/os/k/jinkai/"));
+    assert!(STYLES_CSS.contains(r#"--app-font: "TsangerJinKai02";"#));
+    assert!(STYLES_CSS.contains("font-family: var(--app-font);"));
+    assert!(STYLES_CSS.contains("font: 12px/1.2 var(--app-font);"));
+    assert!(!STYLES_CSS.contains("--mono-font"));
+    assert!(!STYLES_CSS.contains("--serif-font"));
+    assert!(!STYLES_CSS.contains("monospace"));
+    assert!(!STYLES_CSS.contains("Iowan Old Style"));
+    assert!(!STYLES_CSS.contains("Songti SC"));
 }
 
 #[test]
@@ -103,8 +122,7 @@ fn index_html_aligns_sidebar_metrics_and_signal_meter() {
     assert!(STYLES_CSS.contains("margin-bottom: 0;"));
     assert!(STYLES_CSS.contains("grid-template-columns: minmax(0, 1fr) max-content;"));
     assert!(STYLES_CSS.contains("min-width: 4ch;"));
-    assert!(STYLES_CSS.contains("font-family: var(--mono-font);"));
-    assert!(STYLES_CSS.contains("font-family: var(--serif-font);"));
+    assert!(STYLES_CSS.contains("font-family: var(--app-font);"));
     assert!(!STYLES_CSS.contains("grid-template-columns: minmax(0, 1fr) 54px;"));
 }
 
@@ -288,11 +306,15 @@ fn renders_index_page_response() {
 #[test]
 fn serves_static_web_assets() {
     let css = default_web_response("GET", "/styles.css").expect("css response");
+    let font_css = default_web_response("GET", "/font.css").expect("font css response");
     let js = default_web_response("GET", "/app.js").expect("js response");
 
     assert!(css.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(css.contains("content-type: text/css; charset=utf-8\r\n"));
     assert!(css.contains(".signal-wave-primary"));
+    assert!(font_css.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(font_css.contains("content-type: text/css; charset=utf-8\r\n"));
+    assert!(font_css.contains("TsangerJinKai02"));
     assert!(js.starts_with("HTTP/1.1 200 OK\r\n"));
     assert!(js.contains("content-type: application/javascript; charset=utf-8\r\n"));
     assert!(js.contains("requestAnimationFrame(drawSignalFrame);"));
@@ -349,7 +371,14 @@ fn health_endpoint_is_available_even_when_web_ui_is_disabled() {
 fn web_ui_assets_return_404_when_web_ui_is_disabled() {
     let config = WebRuntimeConfig::default();
 
-    for target in ["/", "/index.html", "/styles.css", "/app.js", "/config.json"] {
+    for target in [
+        "/",
+        "/index.html",
+        "/font.css",
+        "/styles.css",
+        "/app.js",
+        "/config.json",
+    ] {
         let response =
             http_response_with_config("GET", target, &config, false).expect("disabled web");
 

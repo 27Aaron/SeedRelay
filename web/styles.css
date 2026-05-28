@@ -14,10 +14,7 @@
     --panel-padding: 22px;
     --inset-padding: 14px;
     --compact-label-size: 11px;
-    --mono-font:
-        ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
-    --serif-font:
-        "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+    --app-font: "TsangerJinKai02";
     --field-bg: #0b0d0a;
     --grid-line: rgba(169, 178, 154, 0.08);
     --grid-line-strong: rgba(169, 178, 154, 0.1);
@@ -44,7 +41,10 @@ body {
         ),
         var(--bg);
     color: var(--ink);
-    font-family: var(--mono-font);
+    font-family: var(--app-font);
+    font-synthesis-weight: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
 }
 
 main {
@@ -380,7 +380,7 @@ button:disabled {
     border: var(--hairline);
     background: color-mix(in srgb, var(--field-bg) 88%, transparent);
     color: var(--ink);
-    font: 12px/1.2 var(--mono-font);
+    font: 12px/1.2 var(--app-font);
     letter-spacing: 0;
     outline: none;
     padding: 0 10px;
@@ -416,7 +416,7 @@ button:disabled {
 
 #partial,
 #final {
-    font-family: var(--serif-font);
+    font-family: var(--app-font);
     letter-spacing: 0;
     scrollbar-width: thin;
     scrollbar-color: var(--scroll-thumb) transparent;
@@ -474,7 +474,7 @@ button:disabled {
     content: attr(data-placeholder);
     display: block;
     color: color-mix(in srgb, var(--muted) 58%, transparent);
-    font-family: var(--mono-font);
+    font-family: var(--app-font);
     font-size: 14px;
     line-height: 1.6;
 }
@@ -492,13 +492,13 @@ button:disabled {
 .line-index {
     color: color-mix(in srgb, var(--muted) 70%, transparent);
     font-size: var(--compact-label-size);
-    font-family: var(--mono-font);
+    font-family: var(--app-font);
     text-transform: uppercase;
 }
 
 .line-text {
     color: color-mix(in srgb, var(--ink) 94%, transparent);
-    font-family: var(--serif-font);
+    font-family: var(--app-font);
     font-size: var(--transcript-content-size);
     line-height: 1.42;
     overflow-wrap: anywhere;
