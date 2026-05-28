@@ -7,6 +7,9 @@
 # Local planning notes and generated specs
 /docs/
 
+# Local git worktrees
+/.worktrees/
+
 # Environment and editor files
 .env
 .env.*
