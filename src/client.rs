@@ -117,11 +117,14 @@ pub async fn transcribe_pcm_channel(
     let start_ms = now_millis();
     let mut frame_index = 0u64;
     let mut pcm_buffer = Vec::new();
+    let mut frame = vec![0u8; config.bytes_per_frame];
 
     while let Some(chunk) = pcm_rx.recv().await {
         pcm_buffer.extend_from_slice(&chunk);
-        while pcm_buffer.len() >= config.bytes_per_frame {
-            let frame: Vec<u8> = pcm_buffer.drain(..config.bytes_per_frame).collect();
+        let mut consumed = 0usize;
+        while pcm_buffer.len() - consumed >= config.bytes_per_frame {
+            let end = consumed + config.bytes_per_frame;
+            frame.copy_from_slice(&pcm_buffer[consumed..end]);
             let frame_state = if frame_index == 0 {
                 FrameState::First
             } else {
@@ -135,6 +138,10 @@ pub async fn transcribe_pcm_channel(
                 ))
                 .await?;
             frame_index += 1;
+            consumed = end;
+        }
+        if consumed > 0 {
+            pcm_buffer.drain(..consumed);
         }
     }
 

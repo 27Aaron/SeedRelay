@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 use opus::{Application, Channels, Encoder};
 
+const OPUS_MAX_FRAME_BYTES: usize = 4000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AudioConfig {
     pub sample_rate: u32,
@@ -124,6 +126,8 @@ fn f32_to_i16(sample: f32) -> i16 {
 pub struct OpusFrameEncoder {
     encoder: Encoder,
     config: AudioConfig,
+    samples: Vec<i16>,
+    output: Vec<u8>,
 }
 
 impl OpusFrameEncoder {
@@ -135,7 +139,12 @@ impl OpusFrameEncoder {
         };
         let encoder = Encoder::new(config.sample_rate, channels, Application::Audio)
             .map_err(|error| anyhow!("failed to create Opus encoder: {error:?}"))?;
-        Ok(Self { encoder, config })
+        Ok(Self {
+            encoder,
+            config,
+            samples: Vec::with_capacity(config.samples_per_frame * config.channels as usize),
+            output: vec![0u8; OPUS_MAX_FRAME_BYTES],
+        })
     }
 
     pub fn encode(&mut self, pcm_frame: &[u8]) -> Result<Vec<u8>> {
@@ -147,16 +156,38 @@ impl OpusFrameEncoder {
             ));
         }
 
-        let samples: Vec<i16> = pcm_frame
-            .chunks_exact(2)
-            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
-            .collect();
-        let mut output = vec![0u8; 4000];
+        self.samples.clear();
+        self.samples.extend(
+            pcm_frame
+                .chunks_exact(2)
+                .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]])),
+        );
         let encoded_len = self
             .encoder
-            .encode(&samples, &mut output)
+            .encode(&self.samples, &mut self.output)
             .map_err(|error| anyhow!("Opus encode failed: {error:?}"))?;
-        output.truncate(encoded_len);
-        Ok(output)
+        Ok(self.output[..encoded_len].to_vec())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opus_encoder_reuses_internal_encode_buffers() {
+        let config = AudioConfig::default();
+        let mut encoder = OpusFrameEncoder::new(config).expect("encoder");
+        let frame = silence_frame(config);
+
+        let first = encoder.encode(&frame).expect("first encode");
+        let sample_capacity = encoder.samples.capacity();
+        let output_len = encoder.output.len();
+        let second = encoder.encode(&frame).expect("second encode");
+
+        assert!(!first.is_empty());
+        assert!(!second.is_empty());
+        assert_eq!(encoder.samples.capacity(), sample_capacity);
+        assert_eq!(encoder.output.len(), output_len);
     }
 }
