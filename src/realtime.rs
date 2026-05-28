@@ -8,7 +8,10 @@ pub const MODEL_OBJECT: &str = "model";
 pub const MODEL_OWNER: &str = "seedrelay";
 pub const MODEL_CREATED_AT: u64 = 0;
 pub const MIN_INPUT_SAMPLE_RATE: u32 = 8_000;
-pub const MAX_INPUT_SAMPLE_RATE: u32 = 192_000;
+pub const MAX_INPUT_SAMPLE_RATE: u32 = 96_000;
+const MAX_CLIENT_EVENT_BYTES: usize = 768 * 1024;
+const MAX_APPEND_AUDIO_BYTES: usize = 512 * 1024;
+const MAX_APPEND_AUDIO_BASE64_BYTES: usize = MAX_APPEND_AUDIO_BYTES.div_ceil(3) * 4;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ClientEvent {
@@ -44,6 +47,10 @@ pub fn validate_realtime_target(target: &str, model: &str) -> Result<()> {
 }
 
 pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
+    if raw.len() > MAX_CLIENT_EVENT_BYTES {
+        return Err(anyhow!("client event too large"));
+    }
+
     let value: Value =
         serde_json::from_str(raw).map_err(|error| anyhow!("invalid JSON: {error}"))?;
     let event_type = value
@@ -58,9 +65,15 @@ pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
                 .get("audio")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow!("append event missing audio"))?;
+            if audio.len() > MAX_APPEND_AUDIO_BASE64_BYTES {
+                return Err(anyhow!("audio payload too large"));
+            }
             let bytes = STANDARD
                 .decode(audio)
                 .map_err(|error| anyhow!("invalid base64 audio: {error}"))?;
+            if bytes.len() > MAX_APPEND_AUDIO_BYTES {
+                return Err(anyhow!("audio payload too large"));
+            }
             Ok(ClientEvent::AppendAudio(bytes))
         }
         "input_audio_buffer.commit" | "session.input_audio_buffer.commit" => {

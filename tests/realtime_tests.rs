@@ -106,6 +106,16 @@ fn rejects_append_events_without_valid_audio() {
 }
 
 #[test]
+fn rejects_oversized_append_audio_payloads() {
+    let audio = STANDARD.encode(vec![0u8; 512 * 1024 + 1]);
+    let raw = format!(r#"{{"type":"input_audio_buffer.append","audio":"{audio}"}}"#);
+
+    let error = decode_client_event(&raw).expect_err("oversized append event");
+
+    assert!(error.to_string().contains("audio payload too large"));
+}
+
+#[test]
 fn decodes_nested_session_update_fields() {
     let event = decode_client_event(
         r#"{
@@ -144,7 +154,7 @@ fn decodes_nested_session_update_fields() {
 
 #[test]
 fn accepts_browser_session_update_sample_rates() {
-    for rate in [44_100, 48_000, 192_000] {
+    for rate in [44_100, 48_000, 96_000] {
         let raw = r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"rate":RATE}}}}}"#
             .replace("RATE", &rate.to_string());
         let event = decode_client_event(&raw).expect("browser sample rate");
@@ -162,6 +172,16 @@ fn accepts_browser_session_update_sample_rates() {
             })
         );
     }
+}
+
+#[test]
+fn rejects_unnecessarily_high_session_update_sample_rate() {
+    let error = decode_client_event(
+        r#"{"type":"session.update","session":{"type":"transcription","audio":{"input":{"format":{"rate":192000}}}}}"#,
+    )
+    .expect_err("unsupported high sample rate");
+
+    assert!(error.to_string().contains("between 8000 and 96000"));
 }
 
 #[test]
