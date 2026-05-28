@@ -1,6 +1,7 @@
 use clap::Parser;
 use seedrelay::cli::Cli;
 use seedrelay::config::{DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
+use seedrelay::credentials::default_credentials_path;
 
 #[test]
 fn parses_default_server_cli() {
@@ -10,6 +11,7 @@ fn parses_default_server_cli() {
     assert_eq!(cli.port, DEFAULT_PORT);
     assert_eq!(cli.model, DEFAULT_MODEL);
     assert!(cli.api_key.is_none());
+    assert_eq!(cli.credentials_path, default_credentials_path());
     assert!(!cli.webui);
 }
 
@@ -40,4 +42,14 @@ fn parses_model_and_api_key_flags() {
 
     assert_eq!(cli.model, "custom-asr");
     assert_eq!(cli.api_key.as_deref(), Some("local-secret"));
+}
+
+#[test]
+fn parses_credentials_path_flag() {
+    let cli = Cli::parse_from(["seedrelay", "--credentials-path", "/tmp/seedrelay.json"]);
+
+    assert_eq!(
+        cli.credentials_path.to_string_lossy(),
+        "/tmp/seedrelay.json"
+    );
 }

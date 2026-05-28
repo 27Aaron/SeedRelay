@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,7 +52,8 @@ impl CachedCredentials {
                 .with_context(|| format!("failed to create directory {}", parent.display()))?;
         }
         let json = serde_json::to_string_pretty(self)?;
-        fs::write(path, json).with_context(|| format!("failed to write {}", path.display()))
+        write_private_file(path, json.as_bytes())
+            .with_context(|| format!("failed to write {}", path.display()))
     }
 }
 
@@ -194,12 +196,18 @@ async fn register_device(client: &reqwest::Client) -> Result<CachedCredentials> 
     let payload: Value = response.json().await.context("invalid register JSON")?;
     if !status.is_success() {
         return Err(anyhow!(
-            "device registration failed: HTTP {status} {payload}"
+            "device registration failed: HTTP {status} {}",
+            redacted_error_payload(&payload)
         ));
     }
 
-    let device_id = json_string_or_number(&payload, "device_id_str", "device_id")
-        .ok_or_else(|| anyhow!("device registration response missing device_id: {payload}"))?;
+    let device_id =
+        json_string_or_number(&payload, "device_id_str", "device_id").ok_or_else(|| {
+            anyhow!(
+                "device registration response missing device_id: {}",
+                redacted_error_payload(&payload)
+            )
+        })?;
     let install_id =
         json_string_or_number(&payload, "install_id_str", "install_id").unwrap_or_default();
 
@@ -247,7 +255,10 @@ async fn fetch_asr_token(client: &reqwest::Client, device_id: &str, cdid: &str) 
     let status = response.status();
     let payload: Value = response.json().await.context("invalid settings JSON")?;
     if !status.is_success() {
-        return Err(anyhow!("ASR token request failed: HTTP {status} {payload}"));
+        return Err(anyhow!(
+            "ASR token request failed: HTTP {status} {}",
+            redacted_error_payload(&payload)
+        ));
     }
 
     payload
@@ -255,7 +266,62 @@ async fn fetch_asr_token(client: &reqwest::Client, device_id: &str, cdid: &str) 
         .and_then(Value::as_str)
         .filter(|token| !token.is_empty())
         .map(ToString::to_string)
-        .ok_or_else(|| anyhow!("settings response missing asr_config.app_key: {payload}"))
+        .ok_or_else(|| {
+            anyhow!(
+                "settings response missing asr_config.app_key: {}",
+                redacted_error_payload(&payload)
+            )
+        })
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(bytes)?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        fs::write(path, bytes)?;
+        Ok(())
+    }
+}
+
+fn redacted_error_payload(payload: &Value) -> Value {
+    match payload {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    let value = if is_sensitive_key(key) {
+                        Value::String("[redacted]".to_string())
+                    } else {
+                        redacted_error_payload(value)
+                    };
+                    (key.clone(), value)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(redacted_error_payload).collect()),
+        other => other.clone(),
+    }
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.contains("token")
+        || key.contains("secret")
+        || key.contains("authorization")
+        || key.contains("app_key")
 }
 
 fn json_string_or_number(payload: &Value, string_key: &str, number_key: &str) -> Option<String> {
@@ -291,4 +357,32 @@ fn now_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .expect("system clock before Unix epoch")
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::redacted_error_payload;
+
+    #[test]
+    fn redacted_error_payload_hides_sensitive_fields() {
+        let payload = json!({
+            "token": "secret-token",
+            "data": {
+                "settings": {
+                    "asr_config": {
+                        "app_key": "secret-app-key"
+                    }
+                }
+            },
+            "safe": "visible"
+        });
+
+        let redacted = redacted_error_payload(&payload).to_string();
+
+        assert!(!redacted.contains("secret-token"));
+        assert!(!redacted.contains("secret-app-key"));
+        assert!(redacted.contains("visible"));
+    }
 }

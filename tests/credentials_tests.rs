@@ -53,6 +53,32 @@ fn saving_credentials_creates_parent_directory() {
     assert_eq!(loaded.device_id, "device-2");
 }
 
+#[cfg(unix)]
+#[test]
+fn saving_credentials_writes_private_file_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("credentials.json");
+    let credentials = CachedCredentials {
+        device_id: "device-private".to_string(),
+        install_id: "install-private".to_string(),
+        cdid: "cdid-private".to_string(),
+        openudid: "openudid-private".to_string(),
+        clientudid: "clientudid-private".to_string(),
+        token: "token-private".to_string(),
+    };
+
+    credentials.save(&path).expect("save credentials");
+
+    let mode = std::fs::metadata(&path)
+        .expect("credentials metadata")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+}
+
 #[test]
 fn loading_invalid_json_fails() {
     let dir = tempfile::tempdir().expect("temp dir");

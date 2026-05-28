@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 
 use crate::config::{DEFAULT_HOST, DEFAULT_MODEL, DEFAULT_PORT};
@@ -19,6 +21,9 @@ pub struct Cli {
 
     #[arg(long)]
     pub api_key: Option<String>,
+
+    #[arg(long, default_value = ".seedrelay/credentials.json")]
+    pub credentials_path: PathBuf,
 
     #[arg(long)]
     pub webui: bool,
