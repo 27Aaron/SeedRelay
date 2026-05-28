@@ -562,6 +562,7 @@ async fn handle_client_event(
 
     match event {
         ClientEvent::SessionUpdate(update) => {
+            validate_session_update_timing(active_turn, session, &update)?;
             let rate_changed = update.apply_to(session, &runtime_config.model)?;
             if rate_changed {
                 *converter = Pcm16Converter::new(session.input_sample_rate);
@@ -621,6 +622,28 @@ fn decode_socket_message(message: Message) -> Result<SocketMessage> {
 
 fn reset_audio_buffer_converter(converter: &mut Pcm16Converter, session: &RealtimeSession) {
     *converter = Pcm16Converter::new(session.input_sample_rate);
+}
+
+fn validate_session_update_timing(
+    active_turn: &ActiveTurn,
+    session: &RealtimeSession,
+    update: &crate::realtime::SessionUpdateConfig,
+) -> Result<()> {
+    let rate_changes = update
+        .input_sample_rate
+        .is_some_and(|rate| rate != session.input_sample_rate);
+    let format_changes = update
+        .input_audio_format_type
+        .as_ref()
+        .is_some_and(|format| format != &session.input_audio_format_type);
+
+    if (rate_changes || format_changes) && !matches!(active_turn.input, TurnInput::Idle) {
+        return Err(anyhow!(
+            "cannot change audio input format while a turn is active"
+        ));
+    }
+
+    Ok(())
 }
 
 fn bad_request_response(error: anyhow::Error) -> ErrorResponse {
@@ -746,7 +769,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use crate::config::ServerConfig;
-    use crate::realtime::{decode_client_event, RealtimeSession};
+    use crate::realtime::{decode_client_event, RealtimeSession, SessionUpdateConfig};
     use tokio::sync::mpsc;
     use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
     use tokio_tungstenite::tungstenite::http::StatusCode;
@@ -755,8 +778,8 @@ mod tests {
     use super::{
         client_action_for_event, decode_socket_message, encode_query_component,
         reset_audio_buffer_converter, selected_realtime_subprotocol, validate_api_key,
-        validate_realtime_request, ActiveTurn, ClientAction, Pcm16Converter, RuntimeConfig,
-        SocketMessage, TurnInput, TurnTranscriptState,
+        validate_realtime_request, validate_session_update_timing, ActiveTurn, ClientAction,
+        Pcm16Converter, RuntimeConfig, SocketMessage, TurnInput, TurnTranscriptState,
     };
 
     #[test]
@@ -919,6 +942,25 @@ mod tests {
         assert!(converter.push(&1i16.to_le_bytes()).is_empty());
         reset_audio_buffer_converter(&mut converter, &session);
         assert!(converter.push(&2i16.to_le_bytes()).is_empty());
+    }
+
+    #[test]
+    fn active_turn_rejects_audio_rate_change_after_audio_started() {
+        let mut turn = ActiveTurn::new_idle();
+        let (pcm_tx, _pcm_rx) = mpsc::channel::<Vec<u8>>(1);
+        turn.ensure_started_with(|_| pcm_tx).expect("open input");
+        let session = RealtimeSession::with_id("sess_test", "seed-asr");
+        let update = SessionUpdateConfig {
+            input_sample_rate: Some(session.input_sample_rate + 1),
+            ..SessionUpdateConfig::default()
+        };
+
+        let error = validate_session_update_timing(&turn, &session, &update)
+            .expect_err("active turn should reject rate changes");
+
+        assert!(error
+            .to_string()
+            .contains("cannot change audio input format while a turn is active"));
     }
 
     #[test]
