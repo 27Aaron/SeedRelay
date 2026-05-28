@@ -3,6 +3,9 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 
 pub const REALTIME_PATH: &str = "/v1/realtime";
+pub const MODEL_OBJECT: &str = "model";
+pub const MODEL_OWNER: &str = "seedrelay";
+pub const MODEL_CREATED_AT: u64 = 0;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ClientEvent {
@@ -58,6 +61,33 @@ pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
         "session.close" => Ok(ClientEvent::Close),
         other => Err(anyhow!("unsupported client event type: {other}")),
     }
+}
+
+pub fn model_object_response(model: &str) -> Value {
+    json!({
+        "id": model,
+        "object": MODEL_OBJECT,
+        "created": MODEL_CREATED_AT,
+        "owned_by": MODEL_OWNER,
+    })
+}
+
+pub fn model_list_response(model: &str) -> Value {
+    json!({
+        "object": "list",
+        "data": [model_object_response(model)],
+    })
+}
+
+pub fn model_not_found_error(model: &str) -> Value {
+    json!({
+        "error": {
+            "message": format!("The model `{model}` does not exist or is not supported by this SeedRelay instance."),
+            "type": "invalid_request_error",
+            "param": "model",
+            "code": "model_not_found",
+        }
+    })
 }
 
 pub fn session_updated_event(model: &str) -> Value {

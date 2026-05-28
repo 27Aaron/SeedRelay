@@ -1,7 +1,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use seedrelay::config::DEFAULT_MODEL;
 use seedrelay::realtime::{
-    decode_client_event, session_updated_event, transcript_completed_event, transcript_delta_event,
+    decode_client_event, model_list_response, model_not_found_error, model_object_response,
+    session_updated_event, transcript_completed_event, transcript_delta_event,
     validate_realtime_target, ClientEvent,
 };
 
@@ -58,4 +59,38 @@ fn renders_openai_style_transcript_events() {
 #[test]
 fn defaults_public_model_to_seed_asr() {
     assert_eq!(DEFAULT_MODEL, "seed-asr");
+}
+
+#[test]
+fn renders_openai_style_model_list_response() {
+    let response = model_list_response("seed-asr");
+
+    assert_eq!(response["object"], "list");
+    assert_eq!(response["data"][0]["id"], "seed-asr");
+    assert_eq!(response["data"][0]["object"], "model");
+    assert_eq!(response["data"][0]["created"], 0);
+    assert_eq!(response["data"][0]["owned_by"], "seedrelay");
+}
+
+#[test]
+fn renders_openai_style_model_object_response() {
+    let response = model_object_response("custom-asr");
+
+    assert_eq!(response["id"], "custom-asr");
+    assert_eq!(response["object"], "model");
+    assert_eq!(response["created"], 0);
+    assert_eq!(response["owned_by"], "seedrelay");
+}
+
+#[test]
+fn renders_model_not_found_error_response() {
+    let response = model_not_found_error("missing-asr");
+
+    assert_eq!(response["error"]["type"], "invalid_request_error");
+    assert_eq!(response["error"]["param"], "model");
+    assert_eq!(response["error"]["code"], "model_not_found");
+    assert!(response["error"]["message"]
+        .as_str()
+        .expect("message")
+        .contains("missing-asr"));
 }
