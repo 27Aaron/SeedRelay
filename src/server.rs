@@ -166,6 +166,16 @@ enum SocketMessage {
     Close,
 }
 
+struct ClientEventContext<'a> {
+    write: &'a mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    credentials: &'a CachedCredentials,
+    turn_output_tx: &'a mpsc::Sender<TurnOutput>,
+    runtime_config: &'a RuntimeConfig,
+    session: &'a mut RealtimeSession,
+    converter: &'a mut Pcm16Converter,
+    active_turn: &'a mut ActiveTurn,
+}
+
 impl RuntimeConfig {
     fn new(config: ServerConfig) -> Self {
         Self {
@@ -256,6 +266,7 @@ pub async fn serve_realtime(
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn handle_connection(
     stream: TcpStream,
     credentials: Arc<CachedCredentials>,
@@ -274,9 +285,7 @@ async fn handle_connection(
     }
 
     let handshake_config = Arc::clone(&runtime_config);
-    let callback = move |request: &Request,
-                         response: Response|
-          -> std::result::Result<Response, ErrorResponse> {
+    let callback = move |request: &Request, response: Response| {
         validate_realtime_request(request, response, handshake_config.as_ref())
     };
     let ws = timeout(
@@ -497,16 +506,16 @@ async fn handle_realtime_socket(
                 };
                 match decode_socket_message(message?) {
                     Ok(SocketMessage::ClientEvent(raw)) => {
-                        match handle_client_event(
-                            &mut write,
-                            &raw,
-                            &credentials,
-                            &turn_output_tx,
-                            runtime_config.as_ref(),
-                            &mut session,
-                            &mut converter,
-                            &mut active_turn,
-                        ).await {
+                        let context = ClientEventContext {
+                            write: &mut write,
+                            credentials: &credentials,
+                            turn_output_tx: &turn_output_tx,
+                            runtime_config: runtime_config.as_ref(),
+                            session: &mut session,
+                            converter: &mut converter,
+                            active_turn: &mut active_turn,
+                        };
+                        match handle_client_event(&raw, context).await {
                             Ok(ClientAction::Continue) => {}
                             Ok(ClientAction::CloseSocket) => {
                                 break;
@@ -592,16 +601,16 @@ async fn handle_realtime_socket(
     Ok(())
 }
 
-async fn handle_client_event(
-    write: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
-    raw: &str,
-    credentials: &CachedCredentials,
-    turn_output_tx: &mpsc::Sender<TurnOutput>,
-    runtime_config: &RuntimeConfig,
-    session: &mut RealtimeSession,
-    converter: &mut Pcm16Converter,
-    active_turn: &mut ActiveTurn,
-) -> Result<ClientAction> {
+async fn handle_client_event(raw: &str, context: ClientEventContext<'_>) -> Result<ClientAction> {
+    let ClientEventContext {
+        write,
+        credentials,
+        turn_output_tx,
+        runtime_config,
+        session,
+        converter,
+        active_turn,
+    } = context;
     let event = decode_client_event(raw)?;
     let action = client_action_for_event(&event);
 
