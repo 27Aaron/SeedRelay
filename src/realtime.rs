@@ -10,10 +10,22 @@ pub const MODEL_CREATED_AT: u64 = 0;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum ClientEvent {
-    SessionUpdate { input_sample_rate: Option<u32> },
+    SessionUpdate(SessionUpdateConfig),
     AppendAudio(Vec<u8>),
     Commit,
+    Clear,
     Close,
+}
+
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct SessionUpdateConfig {
+    pub input_sample_rate: Option<u32>,
+    pub input_audio_format_type: Option<String>,
+    pub transcription_model: Option<String>,
+    pub language: Option<String>,
+    pub delay: Option<String>,
+    pub turn_detection_disabled: bool,
+    pub include: Vec<String>,
 }
 
 pub fn validate_realtime_target(target: &str, model: &str) -> Result<()> {
@@ -43,9 +55,7 @@ pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
         .ok_or_else(|| anyhow!("client event missing type"))?;
 
     match event_type {
-        "session.update" => Ok(ClientEvent::SessionUpdate {
-            input_sample_rate: parse_input_sample_rate(&value),
-        }),
+        "session.update" => Ok(ClientEvent::SessionUpdate(parse_session_update(&value)?)),
         "input_audio_buffer.append" | "session.input_audio_buffer.append" => {
             let audio = value
                 .get("audio")
@@ -59,9 +69,97 @@ pub fn decode_client_event(raw: &str) -> Result<ClientEvent> {
         "input_audio_buffer.commit" | "session.input_audio_buffer.commit" => {
             Ok(ClientEvent::Commit)
         }
+        "input_audio_buffer.clear" | "session.input_audio_buffer.clear" => Ok(ClientEvent::Clear),
         "session.close" => Ok(ClientEvent::Close),
         other => Err(anyhow!("unsupported client event type: {other}")),
     }
+}
+
+fn parse_session_update(value: &Value) -> Result<SessionUpdateConfig> {
+    let session = value
+        .get("session")
+        .ok_or_else(|| anyhow!("session.update missing session"))?;
+    let session = session
+        .as_object()
+        .ok_or_else(|| anyhow!("session must be an object"))?;
+
+    if session
+        .get("type")
+        .is_some_and(|session_type| session_type.as_str() != Some("transcription"))
+    {
+        return Err(anyhow!("only transcription sessions are supported"));
+    }
+
+    let include = match session.get("include") {
+        Some(include) => include
+            .as_array()
+            .ok_or_else(|| anyhow!("session.include must be an array"))?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow!("session.include entries must be strings"))
+            })
+            .collect::<Result<Vec<_>>>()?,
+        None => Vec::new(),
+    };
+
+    let turn_detection = value.pointer("/session/audio/input/turn_detection");
+    if let Some(turn_detection) = turn_detection {
+        if turn_detection != &Value::Null {
+            return Err(anyhow!(
+                "session.audio.input.turn_detection is not supported"
+            ));
+        }
+    }
+
+    Ok(SessionUpdateConfig {
+        input_sample_rate: parse_input_sample_rate(value)?,
+        input_audio_format_type: optional_string(
+            value,
+            "/session/audio/input/format/type",
+            "session.audio.input.format.type",
+        )?,
+        transcription_model: optional_string(
+            value,
+            "/session/audio/input/transcription/model",
+            "session.audio.input.transcription.model",
+        )?,
+        language: optional_string(
+            value,
+            "/session/audio/input/transcription/language",
+            "session.audio.input.transcription.language",
+        )?,
+        delay: optional_string(
+            value,
+            "/session/audio/input/transcription/delay",
+            "session.audio.input.transcription.delay",
+        )?,
+        turn_detection_disabled: turn_detection == Some(&Value::Null),
+        include,
+    })
+}
+
+fn optional_string(root: &Value, pointer: &str, label: &str) -> Result<Option<String>> {
+    match root.pointer(pointer) {
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(_) => Err(anyhow!("{label} must be a string")),
+        None => Ok(None),
+    }
+}
+
+fn optional_u32(root: &Value, pointer: &str, label: &str) -> Result<Option<u32>> {
+    let Some(value) = root.pointer(pointer) else {
+        return Ok(None);
+    };
+    let Some(value) = value.as_u64().and_then(|value| u32::try_from(value).ok()) else {
+        return Err(anyhow!("{label} must be a u32 integer"));
+    };
+    if value == 0 {
+        return Err(anyhow!("{label} must be greater than 0"));
+    }
+    Ok(Some(value))
 }
 
 pub fn model_object_response(model: &str) -> Value {
@@ -119,6 +217,53 @@ impl RealtimeSession {
             input_audio_format_type: "audio/pcm".into(),
             language: None,
         }
+    }
+}
+
+impl SessionUpdateConfig {
+    pub fn apply_to(&self, session: &mut RealtimeSession, configured_model: &str) -> Result<bool> {
+        if let Some(format_type) = &self.input_audio_format_type {
+            if format_type != "audio/pcm" {
+                return Err(anyhow!("only audio/pcm input format is supported"));
+            }
+        }
+
+        if let Some(model) = &self.transcription_model {
+            if model != configured_model {
+                return Err(anyhow!(
+                    "only transcription model `{configured_model}` is supported"
+                ));
+            }
+        }
+
+        if !self.include.is_empty() {
+            return Err(anyhow!("session.include is not supported by SeedRelay"));
+        }
+
+        if self.delay.is_some() {
+            return Err(anyhow!("transcription delay is not supported by SeedRelay"));
+        }
+
+        if let Some(format_type) = &self.input_audio_format_type {
+            session.input_audio_format_type = format_type.clone();
+        }
+
+        if let Some(model) = &self.transcription_model {
+            session.model = model.clone();
+        } else {
+            session.model = configured_model.to_string();
+        }
+
+        if let Some(language) = &self.language {
+            session.language = Some(language.clone());
+        }
+
+        if let Some(rate) = self.input_sample_rate {
+            session.input_sample_rate = rate;
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 }
 
@@ -188,6 +333,13 @@ pub fn input_audio_committed_event(item_id: &str) -> Value {
     })
 }
 
+pub fn input_audio_cleared_event() -> Value {
+    json!({
+        "type": "input_audio_buffer.cleared",
+        "event_id": event_id(),
+    })
+}
+
 pub fn transcript_delta_event(item_id: &str, delta: &str) -> Value {
     json!({
         "type": "conversation.item.input_audio_transcription.delta",
@@ -206,11 +358,12 @@ pub fn transcript_completed_event(item_id: &str, transcript: &str) -> Value {
     })
 }
 
-fn parse_input_sample_rate(value: &Value) -> Option<u32> {
-    value
-        .pointer("/session/audio/input/format/rate")
-        .and_then(Value::as_u64)
-        .and_then(|rate| u32::try_from(rate).ok())
+fn parse_input_sample_rate(value: &Value) -> Result<Option<u32>> {
+    optional_u32(
+        value,
+        "/session/audio/input/format/rate",
+        "session.audio.input.format.rate",
+    )
 }
 
 fn query_param_from_query(query: &str, key: &str) -> Option<String> {

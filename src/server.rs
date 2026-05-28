@@ -21,9 +21,9 @@ use crate::config::ServerConfig;
 use crate::credentials::{ensure_credentials, CachedCredentials, USER_AGENT};
 use crate::realtime::query_param;
 use crate::realtime::{
-    decode_client_event, error_event, input_audio_committed_event, session_created_event,
-    session_updated_event, transcript_completed_event, transcript_delta_event,
-    validate_realtime_target, ClientEvent, RealtimeSession,
+    decode_client_event, error_event, input_audio_cleared_event, input_audio_committed_event,
+    session_created_event, session_updated_event, transcript_completed_event,
+    transcript_delta_event, validate_realtime_target, ClientEvent, RealtimeSession,
 };
 use crate::response::AsrEvent;
 use crate::web::{http_response_with_config, WebRuntimeConfig};
@@ -331,12 +331,11 @@ async fn handle_client_event(
     pcm_tx: &mut Option<mpsc::Sender<Vec<u8>>>,
 ) -> Result<()> {
     match decode_client_event(raw)? {
-        ClientEvent::SessionUpdate { input_sample_rate } => {
-            if let Some(rate) = input_sample_rate {
-                session.input_sample_rate = rate;
-                *converter = Pcm16Converter::new(rate);
+        ClientEvent::SessionUpdate(update) => {
+            let rate_changed = update.apply_to(session, &runtime_config.model)?;
+            if rate_changed {
+                *converter = Pcm16Converter::new(session.input_sample_rate);
             }
-            session.model = runtime_config.model.clone();
             send_json(write, session_updated_event(session)).await?;
         }
         ClientEvent::AppendAudio(audio) => {
@@ -347,6 +346,10 @@ async fn handle_client_event(
             if !pcm.is_empty() {
                 tx.send(pcm).await.context("ASR audio channel closed")?;
             }
+        }
+        ClientEvent::Clear => {
+            reset_audio_buffer_converter(converter, session);
+            send_json(write, input_audio_cleared_event()).await?;
         }
         ClientEvent::Commit => {
             drop(pcm_tx.take());
@@ -396,6 +399,10 @@ fn append_final_transcript(transcript: &mut String, text: &str) -> Option<String
     }
     transcript.push_str(text);
     Some(transcript.clone())
+}
+
+fn reset_audio_buffer_converter(converter: &mut Pcm16Converter, session: &RealtimeSession) {
+    *converter = Pcm16Converter::new(session.input_sample_rate);
 }
 
 fn bad_request_response(error: anyhow::Error) -> ErrorResponse {
@@ -506,10 +513,11 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
     use crate::config::ServerConfig;
+    use crate::realtime::RealtimeSession;
 
     use super::{
         append_final_transcript, encode_query_component, interim_delta, redact_api_key,
-        validate_api_key, RuntimeConfig,
+        reset_audio_buffer_converter, validate_api_key, Pcm16Converter, RuntimeConfig,
     };
 
     #[test]
@@ -543,6 +551,17 @@ mod tests {
             Some("你好啊，hello。".to_string())
         );
         assert_eq!(transcript, "你好啊，hello。");
+    }
+
+    #[test]
+    fn reset_audio_buffer_converter_drops_partial_resampler_state() {
+        let mut session = RealtimeSession::with_id("sess_test", "seed-asr");
+        session.input_sample_rate = 24_000;
+        let mut converter = Pcm16Converter::new(session.input_sample_rate);
+
+        assert!(converter.push(&1i16.to_le_bytes()).is_empty());
+        reset_audio_buffer_converter(&mut converter, &session);
+        assert!(converter.push(&2i16.to_le_bytes()).is_empty());
     }
 
     #[test]
